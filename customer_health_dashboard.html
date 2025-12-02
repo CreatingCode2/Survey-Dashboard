@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Health Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="customer_health_dashboard.css">
+</head>
+
+<body class="antialiased">
+
+    <div id="app" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-4xl font-bold text-[#4A5C6A] tracking-tight">Customer Health Dashboard</h1>
+                <p class="mt-2 text-lg text-gray-600">Real-time insights from customer health check surveys.</p>
+            </div>
+            <div class="flex gap-3">
+                <button onclick="openCsmManager()"
+                    class="px-4 py-2 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition shadow-md text-sm">
+                    Manage CSMs
+                </button>
+                <button id="login-btn" onclick="promptLogin()"
+                    class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition shadow-md text-sm">
+                    Login for Editing
+                </button>
+            </div>
+        </header>
+
+        <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200/80 mb-6">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <nav class="flex items-center space-x-2 bg-gray-100 p-1 rounded-lg">
+                    <button id="nav-dashboard"
+                        class="nav-button active px-4 py-2 text-sm font-semibold rounded-md w-full md:w-auto">Dashboard</button>
+                    <button id="nav-triage"
+                        class="nav-button px-4 py-2 text-sm font-semibold rounded-md w-full md:w-auto flex items-center justify-center gap-2">
+                        Triage View
+                        <span id="triage-count"
+                            class="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">0</span>
+                    </button>
+                    <button id="nav-data"
+                        class="nav-button px-4 py-2 text-sm font-semibold rounded-md w-full md:w-auto">Data
+                        Table</button>
+                </nav>
+                <div class="flex flex-col sm:flex-row gap-4 flex-wrap">
+                    <div class="w-full sm:w-48">
+                        <label for="tierFilter" class="text-sm font-medium text-gray-700 sr-only">Customer
+                            Industry</label>
+                        <select id="tierFilter"
+                            class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
+                            <option value="all">All Industries</option>
+                            <option value="Finance">Finance</option>
+                            <option value="Healthcare">Healthcare</option>
+                            <option value="Retail">Retail</option>
+                            <option value="Manufacturing">Manufacturing</option>
+                            <option value="Technology">Technology</option>
+                            <option value="Education">Education</option>
+                        </select>
+                    </div>
+                    <div class="w-full sm:w-48">
+                        <label for="dateFilter" class="text-sm font-medium text-gray-700 sr-only">Date Range</label>
+                        <select id="dateFilter"
+                            class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
+                            <option value="all">All Time</option>
+                            <option value="7">Last 7 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="60">Last 60 Days</option>
+                            <option value="90">Last 90 Days</option>
+                            <option value="180">Last 6 Months</option>
+                            <option value="365">Last Year</option>
+                            <option value="custom">Custom Range</option>
+                        </select>
+                    </div>
+
+                    <div id="customRangeWrapper" class="hidden w-full sm:w-80 flex gap-4">
+                        <div class="w-1/2">
+                            <label for="startDate" class="text-xs font-medium text-gray-500 block">Start Date</label>
+                            <input type="date" id="startDate"
+                                class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mt-1">
+                        </div>
+                        <div class="w-1/2">
+                            <label for="endDate" class="text-xs font-medium text-gray-500 block">End Date</label>
+                            <input type="date" id="endDate"
+                                class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mt-1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <main>
+            <section id="view-dashboard">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                    <div class="kpi-card text-center">
+                        <h3 class="text-sm font-medium text-gray-500">CLEAN_Address Score</h3>
+                        <p id="kpi-avg-happiness" class="mt-1 text-4xl font-bold text-[#4A5C6A]">N/A</p>
+                    </div>
+                    <div class="kpi-card text-center">
+                        <h3 class="text-sm font-medium text-gray-500">Total Responses</h3>
+                        <p id="kpi-total-responses" class="mt-1 text-4xl font-bold text-[#4A5C6A]">0</p>
+                    </div>
+                    <div class="kpi-card text-center">
+                        <h3 class="text-sm font-medium text-gray-500">At-Risk Customers</h3>
+                        <p id="kpi-at-risk" class="mt-1 text-4xl font-bold text-red-600">0</p>
+                    </div>
+                    <div class="kpi-card text-center">
+                        <h3 class="text-sm font-medium text-gray-500">New Responses (24h)</h3>
+                        <p id="kpi-new-today" class="mt-1 text-4xl font-bold text-green-600">0</p>
+                    </div>
+                </div>
+                <div id="loading-spinner" class="text-center py-12">
+                    <div
+                        class="animate-spin inline-block w-8 h-8 border-4 border-t-4 border-gray-400 border-t-[#4A5C6A] rounded-full">
+                    </div>
+                    <p class="mt-3 text-gray-600">Loading data from Google Sheet...</p>
+                </div>
+                <div id="dashboard-content" class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden">
+                    <div class="chart-card lg:col-span-2">
+                        <h2 class="text-lg font-semibold mb-1">CLEAN_Address Score Trend</h2>
+                        <p class="text-sm text-gray-500 mb-4">Average score over time</p>
+                        <div class="chart-container flex-grow">
+                            <canvas id="healthTrendChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2 class="text-lg font-semibold mb-1">CLEAN_Address Score Distribution</h2>
+                        <p class="text-sm text-gray-500 mb-4">Click segment to filter Data Table</p>
+                        <div class="chart-container flex-grow">
+                            <canvas id="happinessChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2 class="text-lg font-semibold mb-1">ROI Score Distribution</h2>
+                        <p class="text-sm text-gray-500 mb-4">Click segment to filter Data Table</p>
+                        <div class="chart-container flex-grow">
+                            <canvas id="roiChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card lg:col-span-2">
+                        <h2 class="text-lg font-semibold mb-1">CLEAN_Address Score vs. ROI Correlation</h2>
+                        <p class="text-sm text-gray-500 mb-4">Click cluster to filter Data Table</p>
+                        <div class="chart-container flex-grow">
+                            <canvas id="roiVsHappinessChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2 class="text-lg font-semibold mb-1">Product Adoption Score</h2>
+                        <p class="text-sm text-gray-500 mb-4">Average of ROI (Q4), Batch Processing (Q14), and
+                            CLEAN_File Awareness (Q12). Click segment to filter Data Table</p>
+                        <div class="chart-container flex-grow">
+                            <canvas id="adoptionChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2 class="text-lg font-semibold mb-1">Support Satisfaction Score</h2>
+                        <p class="text-sm text-gray-500 mb-4">Based on support portal usage</p>
+                        <div class="chart-container flex-grow">
+                            <canvas id="supportChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card lg:col-span-2">
+                        <h2 class="text-lg font-semibold mb-1">Recent Qualitative Feedback</h2>
+                        <p class="text-sm text-gray-500 mb-4">Latest customer comments</p>
+                        <div id="feedback-list" class="space-y-4 overflow-y-auto h-80 pr-2">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-triage" class="hidden">
+                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded-r-lg">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"
+                                fill="currentColor" aria-hidden="true">
+                                <path fill-rule="evenodd"
+                                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.21 3.03-1.742 3.03H4.42c-1.532 0-2.492-1.696-1.742-3.03l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1.75-5.25a1.75 1.75 0 00-3.5 0v.25a1.75 1.75 0 003.5 0v-.25z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="w-full">
+                            <label for="triageStatusFilter"
+                                class="text-xs font-medium text-gray-500 uppercase">Follow-up Status</label>
+                            <select id="triageStatusFilter"
+                                class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mt-1">
+                                <option value="all">All Active Statuses</option>
+                                <option value="New Response">New Response</option>
+                                <option value="Followed Up - Low Risk">Followed Up - Low Risk</option>
+                                <option value="Followed Up - High Risk">Followed Up - High Risk</option>
+                                <option value="Archived">Archived (Hidden by default)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="triage-list" class="space-y-4">
+                </div>
+            </section>
+
+            <section id="view-data" class="hidden">
+                <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6 rounded-r-lg">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"
+                                fill="currentColor">
+                                <path fill-rule="evenodd"
+                                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm text-blue-700">This table contains all survey responses. Use the global
+                                filters at the top to narrow down the data. Click View Details for the full response.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div id="drilldown-status-bar-container">
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200/80 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Company</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Health (Q2)</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Adoption (Avg)</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        ROI (Q4)</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Support (Q10)</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Batch Use (Q14)</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        CLEAN File (Q12)</th>
+                                    <th scope="col" scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Cloud Plan (Q16)</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Reference? (Q30)</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Industry</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 whitespace-nowrap text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="data-table-body" class="bg-white divide-y divide-gray-200">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Modal for CSM Management -->
+    <div id="csm-modal"
+        class="modal fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 invisible opacity-0"
+        aria-modal="true" role="dialog">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
+                <h3 class="text-xl font-bold text-[#4A5C6A]">Manage CSMs</h3>
+                <button onclick="closeCsmModal()" class="text-gray-500 hover:text-gray-800">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                    </svg>
+                </button>
+            </div>
+            <div class="p-6">
+                <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
+                    <p class="text-sm text-blue-700">These CSMs will appear in the Triage View dropdowns. Email
+                        notifications for new survey responses are configured separately in your email system.</p>
+                </div>
+
+                <h4 class="font-semibold text-gray-800 mb-3">Current CSMs:</h4>
+                <div id="csm-list" class="space-y-2 mb-6">
+                    <!-- CSM list will be populated here -->
+                </div>
+
+                <div class="border-t pt-4">
+                    <h4 class="font-semibold text-gray-800 mb-3">Add New CSM:</h4>
+                    <div class="flex gap-3">
+                        <input type="text" id="new-csm-name" placeholder="CSM Name"
+                            class="flex-1 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
+                        <button onclick="addNewCsm()"
+                            class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition text-sm">
+                            Add CSM
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <p class="text-sm text-yellow-800"><strong>Note:</strong> CSM emails for notifications:</p>
+                    <ul class="text-sm text-yellow-800 mt-2 space-y-1">
+                        <li>• Misty Wilmore: misty.wilmore@runnertechnologies.com</li>
+                        <li>• Tonja Jones: tonja.jones@runnertechnologies.com</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="p-4 border-t border-gray-200 text-right sticky bottom-0 bg-white">
+                <button onclick="closeCsmModal()"
+                    class="px-4 py-2 bg-[#4A5C6A] text-white font-semibold rounded-lg hover:bg-[#3D3B38] transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Detailed Customer Responses -->
+    <div id="details-modal"
+        class="modal fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 invisible opacity-0"
+        aria-modal="true" role="dialog">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200 flex justify-between items-center sticky top-0 bg-white">
+                <h3 id="modal-title" class="text-xl font-bold text-[#4A5C6A]">Full Survey Response Details</h3>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-800">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                    </svg>
+                </button>
+            </div>
+            <div id="modal-content" class="p-6 grid grid-cols-1 gap-6">
+            </div>
+            <div class="p-4 border-t border-gray-200 text-right sticky bottom-0 bg-white">
+                <button onclick="closeModal()"
+                    class="px-4 py-2 bg-[#4A5C6A] text-white font-semibold rounded-lg hover:bg-[#3D3B38] transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="customer_health_dashboard.js"></script>
+</body>
+
+</html>
