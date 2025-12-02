@@ -212,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Valid rows parsed:", results.length);
         let rejectedCount = 0;
 
-        const processed = rawData.map((d, index) => {
+        const processed = results.map((d, index) => {
             const rawDate = d.date.replace(/["']/g, '');
 
             let parsedDate;
@@ -295,6 +295,42 @@ document.addEventListener('DOMContentLoaded', () => {
         return processed;
     }
 
+    async function fetchCustomerData() {
+        try {
+            const response = await fetch('customer_data.csv');
+            if (!response.ok) {
+                console.warn('Could not load customer_data.csv, using defaults');
+                return;
+            }
+
+            const csvText = await response.text();
+            const lines = csvText.trim().split('\n');
+
+            // Skip header row
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+
+                // Simple CSV parsing (assuming no commas in fields)
+                const parts = line.split(',');
+                if (parts.length >= 3) {
+                    const company = parts[0].trim().toLowerCase();
+                    const industry = parts[1].trim();
+                    const erp = parts[2].trim();
+
+                    customerMasterData[company] = {
+                        industry: industry,
+                        erp: erp
+                    };
+                }
+            }
+
+            console.log('Customer master data loaded:', Object.keys(customerMasterData).length, 'companies');
+        } catch (error) {
+            console.warn('Error loading customer master data:', error);
+        }
+    }
+
     async function fetchData() {
         const loadingSpinner = document.getElementById('loading-spinner');
         const dashboardContent = document.getElementById('dashboard-content');
@@ -331,7 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Load master data first
             await fetchCustomerData();
 
-            rawResponses = processData(parsedData);
+            rawResponses = parsedData;
 
             console.log("Data loaded successfully:", rawResponses.length, "responses");
             dashboardContent.classList.remove('hidden');

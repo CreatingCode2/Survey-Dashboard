@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Customer Health Dashboard</title>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -165,6 +166,13 @@
                             <canvas id="supportChart"></canvas>
                         </div>
                     </div>
+                    <div class="chart-card">
+                        <h2 class="text-lg font-semibold mb-1">Health Score by ERP System</h2>
+                        <p class="text-sm text-gray-500 mb-4">Average health score grouped by ERP</p>
+                        <div class="chart-container flex-grow">
+                            <canvas id="erpHealthChart"></canvas>
+                        </div>
+                    </div>
                     <div class="chart-card lg:col-span-2">
                         <h2 class="text-lg font-semibold mb-1">Recent Qualitative Feedback</h2>
                         <p class="text-sm text-gray-500 mb-4">Latest customer comments</p>
@@ -184,6 +192,14 @@
                                     d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.21 3.03-1.742 3.03H4.42c-1.532 0-2.492-1.696-1.742-3.03l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1.75-5.25a1.75 1.75 0 00-3.5 0v.25a1.75 1.75 0 003.5 0v-.25z"
                                     clip-rule="evenodd" />
                             </svg>
+                        </div>
+                        <div class="w-full ml-3">
+                            <label for="triageCsmFilter" class="text-xs font-medium text-gray-500 uppercase">Assigned
+                                CSM</label>
+                            <select id="triageCsmFilter"
+                                class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mt-1">
+                                <option value="all">All CSMs</option>
+                            </select>
                         </div>
                         <div class="w-full">
                             <label for="triageStatusFilter"
@@ -259,6 +275,9 @@
                                     <th scope="col"
                                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Industry</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        ERP</th>
                                     <th scope="col"
                                         class="px-3 py-3 whitespace-nowrap text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Details</th>
