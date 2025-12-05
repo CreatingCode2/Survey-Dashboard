@@ -261,12 +261,64 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }
 
-            return {
+            // Look up by email domain first, then company name
+            let masterData = null;
+            let correctedName = companyName;
+            let matchMethod = 'none';
+
+            console.log(`\n🔎 [DEBUG] Processing record ${index + 1}:`);
+            console.log(`   Original company name: "${companyName}"`);
+            console.log(`   Email: "${d.email || 'NO EMAIL'}"`);
+
+            if (d.email && d.email.includes('@')) {
+                const domain = d.email.split('@')[1].toLowerCase();
+                const domainKey = `domain:${domain}`;
+                console.log(`   🌐 Attempting domain lookup with key: "${domainKey}"`);
+
+                masterData = customerMasterData[domainKey];
+                if (masterData) {
+                    correctedName = masterData.name;
+                    matchMethod = 'domain';
+                    console.log(`   ✅ DOMAIN MATCH FOUND!`);
+                    console.log(`      → Corrected name: "${correctedName}"`);
+                    console.log(`      → Industry: "${masterData.industry}"`);
+                    console.log(`      → ERP: "${masterData.erp}"`);
+                } else {
+                    console.log(`   ❌ No domain match found for "${domain}"`);
+                    console.log(`      Available domain keys sample:`, Object.keys(customerMasterData).filter(k => k.startsWith('domain:')).slice(0, 5));
+                }
+            } else {
+                console.log(`   ⚠️ No valid email found, skipping domain lookup`);
+            }
+
+            if (!masterData) {
+                const nameKey = companyName.toLowerCase();
+                console.log(`   🏢 Attempting company name lookup with key: "${nameKey}"`);
+
+                masterData = customerMasterData[nameKey];
+                if (masterData) {
+                    correctedName = masterData.name;
+                    matchMethod = 'name';
+                    console.log(`   ✅ COMPANY NAME MATCH FOUND!`);
+                    console.log(`      → Corrected name: "${correctedName}"`);
+                    console.log(`      → Industry: "${masterData.industry}"`);
+                    console.log(`      → ERP: "${masterData.erp}"`);
+                } else {
+                    console.log(`   ❌ No company name match found for "${nameKey}"`);
+                    console.log(`      Available company keys sample:`, Object.keys(customerMasterData).filter(k => !k.startsWith('domain:')).slice(0, 5));
+                }
+            }
+
+            if (!masterData) {
+                console.log(`   ⚠️ NO MATCH FOUND - Will use defaults (Unknown Industry/ERP)`);
+            }
+
+            const finalRecord = {
                 id: index + 1,
                 uniqueId: uniqueId,
-                company: companyName,
-                industry: customerMasterData[companyName.toLowerCase()]?.industry || 'Unknown',
-                erp: customerMasterData[companyName.toLowerCase()]?.erp || 'Unknown',
+                company: correctedName,
+                industry: masterData?.industry || 'Unknown',
+                erp: masterData?.erp || 'Unknown',
                 date: parsedDate.toISOString(),
 
                 ...d,
@@ -280,6 +332,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 assignedCsm: triageDetails[uniqueId].assignedCsm,
                 triageHistory: triageDetails[uniqueId].history,
             };
+
+            console.log(`   📝 Final record created:`);
+            console.log(`      Company: "${finalRecord.company}"`);
+            console.log(`      Industry: "${finalRecord.industry}"`);
+            console.log(`      ERP: "${finalRecord.erp}"`);
+            console.log(`      Match method: ${matchMethod}`);
+
+            return finalRecord;
         }).filter(r => {
             const isValid = r.company && r.company.trim().length > 0;
             if (!isValid) {
@@ -295,39 +355,99 @@ document.addEventListener('DOMContentLoaded', () => {
         return processed;
     }
 
+    // Helper function to parse a single CSV line (handles quoted fields)
+    function parseCSVLine(line) {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = line[i + 1];
+
+            if (char === '"') {
+                if (inQuotes && nextChar === '"') {
+                    current += '"';
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === ',' && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        result.push(current.trim());
+        return result;
+    }
+
     async function fetchCustomerData() {
         try {
+            console.log('🔍 [DEBUG] Starting to load customer_data.csv...');
             const response = await fetch('customer_data.csv');
             if (!response.ok) {
-                console.warn('Could not load customer_data.csv, using defaults');
+                console.warn('⚠️ [DEBUG] Could not load customer_data.csv, using defaults');
                 return;
             }
 
             const csvText = await response.text();
             const lines = csvText.trim().split('\n');
+            console.log(`📄 [DEBUG] CSV loaded: ${lines.length} total lines (including header)`);
 
-            // Skip header row
+            // Parse header
+            const header = parseCSVLine(lines[0]);
+            console.log('📋 [DEBUG] CSV Header columns:', header.length);
+            console.log('📋 [DEBUG] Header:', header);
+
+            let domainCount = 0;
+            let companyCount = 0;
+
+            // Parse data rows
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
 
-                // Simple CSV parsing (assuming no commas in fields)
-                const parts = line.split(',');
-                if (parts.length >= 3) {
-                    const company = parts[0].trim().toLowerCase();
-                    const industry = parts[1].trim();
-                    const erp = parts[2].trim();
+                // Use proper CSV parsing to handle quoted fields
+                const parts = parseCSVLine(line);
+                if (parts.length >= 7) {
+                    const companyOriginal = parts[0].trim();
+                    const domain = parts[1].trim().toLowerCase();
+                    const industry = parts[5].trim();
+                    const erp = parts[6].trim();
 
-                    customerMasterData[company] = {
+                    // Log first few entries for verification
+                    if (i <= 3) {
+                        console.log(`📊 [DEBUG] Row ${i}: Company="${companyOriginal}", Domain="${domain}", Industry="${industry}", ERP="${erp}"`);
+                    }
+
+                    // Index by domain for email matching
+                    if (domain) {
+                        customerMasterData[`domain:${domain}`] = {
+                            name: companyOriginal,
+                            industry: industry,
+                            erp: erp
+                        };
+                        domainCount++;
+                    }
+
+                    // Also index by company name as fallback
+                    customerMasterData[companyOriginal.toLowerCase()] = {
+                        name: companyOriginal,
                         industry: industry,
                         erp: erp
                     };
+                    companyCount++;
                 }
             }
 
-            console.log('Customer master data loaded:', Object.keys(customerMasterData).length, 'companies');
+            console.log(`✅ [DEBUG] Customer master data loaded: ${Object.keys(customerMasterData).length} total keys`);
+            console.log(`   - ${domainCount} domain entries`);
+            console.log(`   - ${companyCount} company name entries`);
+            console.log('🔑 [DEBUG] Sample keys:', Object.keys(customerMasterData).slice(0, 10));
         } catch (error) {
-            console.warn('Error loading customer master data:', error);
+            console.error('❌ [DEBUG] Error loading customer master data:', error);
         }
     }
 
@@ -356,20 +476,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error("Received HTML instead of CSV. Check Apps Script deployment settings.");
             }
 
+            console.log('\n═══════════════════════════════════════════════════');
+            console.log('🚀 [DEBUG] Starting data processing pipeline');
+            console.log('═══════════════════════════════════════════════════\n');
+
+            // Load master data FIRST before parsing survey data
+            console.log('📥 [DEBUG] Step 1: Loading customer master data...');
+            await fetchCustomerData();
+
+            console.log('\n📊 [DEBUG] Step 2: Parsing survey CSV data...');
             const parsedData = parseCSV(csvText);
 
             if (parsedData.length === 0) {
                 throw new Error("No data rows found.");
             }
 
-
-
-            // Load master data first
-            await fetchCustomerData();
-
             rawResponses = parsedData;
 
-            console.log("Data loaded successfully:", rawResponses.length, "responses");
+            console.log('\n═══════════════════════════════════════════════════');
+            console.log(`✅ [DEBUG] Data loaded successfully: ${rawResponses.length} responses`);
+            console.log('═══════════════════════════════════════════════════\n');
+
+            // Summary statistics
+            const unknownIndustry = rawResponses.filter(r => r.industry === 'Unknown').length;
+            const unknownErp = rawResponses.filter(r => r.erp === 'Unknown').length;
+            console.log(`📈 [DEBUG] Summary:`);
+            console.log(`   - Total responses: ${rawResponses.length}`);
+            console.log(`   - Unknown Industry: ${unknownIndustry} (${((unknownIndustry / rawResponses.length) * 100).toFixed(1)}%)`);
+            console.log(`   - Unknown ERP: ${unknownErp} (${((unknownErp / rawResponses.length) * 100).toFixed(1)}%)`);
+
             dashboardContent.classList.remove('hidden');
 
         } catch (error) {
@@ -889,16 +1024,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const trendValues = trendData.map(d => d.happiness);
         charts.healthTrend.data.labels = trendLabels;
         charts.healthTrend.data.datasets[0].data = trendValues;
-
         charts.healthTrend.update();
 
-        // Update ERP Chart
+        // Update ERP Chart - Split multi-ERP entries for analytics
         const erpStats = {};
+        let multiErpCount = 0;
+
         data.forEach(d => {
-            if (!erpStats[d.erp]) erpStats[d.erp] = { total: 0, count: 0 };
-            erpStats[d.erp].total += d.happiness;
-            erpStats[d.erp].count++;
+            // Split ERP field by comma to handle multi-ERP customers
+            const erpList = d.erp.split(',').map(e => e.trim()).filter(e => e.length > 0);
+
+            if (erpList.length > 1) {
+                multiErpCount++;
+                if (multiErpCount <= 3) {
+                    console.log(`📊 [ERP Split] "${d.company}" uses multiple ERPs: ${erpList.join(', ')}`);
+                }
+            }
+
+            // Add this customer's health score to each ERP they use
+            erpList.forEach(erp => {
+                if (!erpStats[erp]) erpStats[erp] = { total: 0, count: 0 };
+                erpStats[erp].total += d.happiness;
+                erpStats[erp].count++;
+            });
         });
+
+        if (multiErpCount > 0) {
+            console.log(`📊 [ERP Analytics] Found ${multiErpCount} customers using multiple ERP systems`);
+        }
 
         const erpLabels = Object.keys(erpStats).sort();
         const erpValues = erpLabels.map(erp => (erpStats[erp].total / erpStats[erp].count).toFixed(1));
