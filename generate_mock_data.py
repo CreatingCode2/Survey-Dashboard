@@ -188,15 +188,15 @@ def generate_survey_responses(num_responses, companies, months=12):
             'Email Address': email,
             'What is the name of your organization and the name of the person completing this survey?': f"{company['Company']} - {respondent_name}",
             'How has CLEAN_Address been working for your organization?': health,
-            'Explain or provide additional feedback below': generate_feedback(sentiment),
+            'Explain or provide additional feedback below': generate_feedback(sentiment),  # Always populate
             'Do you feel you are getting a return on your investment?': roi,
-            'Explain or provide additional feedback below_2': generate_feedback(sentiment) if random.random() > 0.7 else '',
+            'Explain or provide additional feedback below_2': generate_feedback(sentiment) if random.random() > 0.4 else '',  # 60% chance
             'Can you confirm who should receive renewal quotes/invoices for your organization? Please add their name(s) and email address below.': f"{fake.name()}, {fake.email()}",
             'Can you confirm the Bill To and Ship To addresses? Please add the address below.': company['Address'],
             'Who are the end user(s) or functional user(s) at your organization? If your organization has multiple users please list the top 5. Please add their name(s) and email address(es). Note: The end user or functional user would be the person responsible for entering data into your system.': f"{fake.name()}, {fake.email()}",
             'How often do you download and update the new data files?': update_frequency,
             'Do you or your end user(s) use the Support Portal or the Knowledge Base (My Runner EDQ)?': support_portal,
-            'Explain or provide additional feedback below_3': generate_feedback('neutral') if random.random() > 0.8 else '',
+            'Explain or provide additional feedback below_3': generate_feedback('neutral') if random.random() > 0.5 else '',  # 50% chance
             'Are you aware of the file processing application included with your CLEAN_Address subscription called CLEAN_File? Note: This utility allows you to process a flat file before loading data into your system(s).': clean_file_aware,
             'Explain or provide additional feedback below_4': '',
             'Are you using Batch Processing included with your subscription to keep your database up to date?': batch_processing,
@@ -204,7 +204,7 @@ def generate_survey_responses(num_responses, companies, months=12):
             'Do you have any plans for migration to the cloud?': cloud_plan,
             'Have you upgraded to CLEAN_Address version 5x?': upgrade_5x,
             'Explain or provide additional feedback below_6': '',
-            'Are there any suggestions to improve our processes and help with customer success (e.g. Would you like us to provide more product knowledge or training on our products and/or services?) If yes, please provide details in the "Comment" box.': generate_feedback('neutral') if random.random() > 0.6 else '',
+            'Are there any suggestions to improve our processes and help with customer success (e.g. Would you like us to provide more product knowledge or training on our products and/or services?) If yes, please provide details in the "Comment" box.': generate_feedback('neutral') if random.random() > 0.4 else '',  # 60% chance
             'Explain or provide additional feedback below_7': '',
             'Are there other data "types" or "sets" you are interested in acquiring or appending to your existing records? If yes, please add the details in the "Comment" box. (Examples of data "types" or "sets" are cell phone, email, household income, gender, occupation, etc.)': '',
             'Explain or provide additional feedback below_8': '',
@@ -220,7 +220,7 @@ def generate_survey_responses(num_responses, companies, months=12):
             'Explain or provide additional feedback below_13': '',
             'Can you refer any other organization you feel would benefit from our products and services? If yes, please list the organization(s) in the "Comment" box?': '',
             'Explain or provide additional feedback below_14': '',
-            'Are there any other details that you would like to provide?': generate_feedback('neutral') if random.random() > 0.7 else ''
+            'Are there any other details that you would like to provide?': generate_feedback('neutral') if random.random() > 0.4 else ''  # 60% chance
         }
         
         responses.append(response)
