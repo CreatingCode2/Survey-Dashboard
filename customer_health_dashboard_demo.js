@@ -535,11 +535,11 @@ document.addEventListener('DOMContentLoaded', () => {
             updateDashboard();
         }
     }
-
     let isLoggedIn = false;
     let currentUser = { id: 'guest', name: 'Guest User' };
 
     window.promptLogin = function () {
+        console.log('Inside promptLogin function');
         const userName = prompt("Enter your name to log in and enable editing:");
         if (userName && userName.trim() !== '') {
             currentUser.id = userName.toLowerCase().replace(/\s/g, '_');
@@ -690,7 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
             item.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg';
             item.innerHTML = `
         <span class="text-sm font-medium text-gray-800">${csm}</span>
-        <button onclick="removeCsm(${index})" class="px-3 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition">
+        <button type="button" onclick="removeCsm(${index})" class="px-3 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition">
             Remove
         </button>
     `;
@@ -1175,6 +1175,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+
+
     function renderTriageList() {
         const listEl = document.getElementById('triage-list');
         listEl.innerHTML = '';
@@ -1332,32 +1334,31 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDataTable(data);
     }
 
-    const csmFilterEl = document.getElementById('triageCsmFilter');
-    CSMs.forEach(csm => {
-        const option = document.createElement('option');
-        option.value = csm;
-        option.textContent = csm;
-        csmFilterEl.appendChild(option);
-    });
 
-    const triageCsmFilter = document.getElementById('triageCsmFilter');
-    const triageStatusFilter = document.getElementById('triageStatusFilter');
-
-    if (triageCsmFilter) {
-        triageCsmFilter.addEventListener('change', function (e) {
-            triageState.csm = e.target.value;
-            renderTriageList();
-        });
-    }
-
-    if (triageStatusFilter) {
-        triageStatusFilter.addEventListener('change', function (e) {
-            triageState.status = e.target.value;
-            renderTriageList();
-        });
-    }
 
     function init() {
+        console.log('Initializing Demo Dashboard...');
+        if (typeof updateCsmDropdowns === 'function') {
+            updateCsmDropdowns();
+        }
+
+        const triageCsmFilter = document.getElementById('triageCsmFilter');
+        const triageStatusFilter = document.getElementById('triageStatusFilter');
+
+        if (triageCsmFilter) {
+            triageCsmFilter.addEventListener('change', function (e) {
+                triageState.csm = e.target.value;
+                renderTriageList();
+            });
+        }
+
+        if (triageStatusFilter) {
+            triageStatusFilter.addEventListener('change', function (e) {
+                triageState.status = e.target.value;
+                renderTriageList();
+            });
+        }
+
         fetchData();
         createCharts();
         updateUIForAuth();
@@ -1367,20 +1368,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const loginBtn = document.getElementById('login-btn');
         if (loginBtn) {
             loginBtn.addEventListener('click', function () {
+                console.log('Login button clicked. isLoggedIn:', isLoggedIn);
                 if (!isLoggedIn) {
-                    promptLogin();
+                    console.log('Calling promptLogin...');
+                    window.promptLogin();
                 }
             });
         }
 
         const manageCsmsBtn = document.getElementById('manage-csms-btn');
         if (manageCsmsBtn) {
-            manageCsmsBtn.addEventListener('click', openCsmManager);
+            manageCsmsBtn.addEventListener('click', window.openCsmManager);
         }
 
         const addCsmBtn = document.getElementById('add-csm-btn');
         if (addCsmBtn) {
-            addCsmBtn.addEventListener('click', addNewCsm);
+            console.log('Attaching Add CSM button listener');
+            addCsmBtn.addEventListener('click', function () {
+                console.log('Add CSM button clicked');
+                window.addNewCsm();
+            });
+        }
+
+        // Add Enter key support for CSM Name input
+        const newCsmInput = document.getElementById('new-csm-name');
+        if (newCsmInput) {
+            newCsmInput.addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') {
+                    console.log('Enter key pressed in CSM input');
+                    window.addNewCsm();
+                }
+            });
         }
     }
 
