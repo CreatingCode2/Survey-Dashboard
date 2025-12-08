@@ -63,7 +63,9 @@ document.addEventListener('DOMContentLoaded', () => {
         'Are you willing to be a reference for RunnerEDQ and CLEAN_Address?': 'reference_Q30',
         'Can you refer any other organization you feel would benefit from our products and services? If yes, please list the organization(s) in the "Comment" box?': 'refer_org_Q32',
         'Can you refer any other organization you feel would benefit from our products and services? If yes, please list the organization(s) in the "Comment" box?  ': 'refer_org_Q32',
-        'Are there any other details that you would like to provide?': 'other_details_Q34'
+        'Are there any other details that you would like to provide?': 'other_details_Q34',
+        'Please provide any additional feedback or comments.': 'feedback_Q3',
+        'Please provide any additional feedback or comments.  ': 'feedback_Q3'
     };
 
     // Feedback fields mapping
