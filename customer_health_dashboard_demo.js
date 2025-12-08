@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', () => {
 
-    // --- CONFIGURATION: GOOGLE APPS SCRIPT WEB APP URL ---
-    const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ1y8hdlqfU4FCGquP0--BmDzHemCOHnN4w2qEUZtmdyXwxz/exec';
+    // --- CONFIGURATION: DEMO MODE - LOADS FROM LOCAL CSV ---
+    // This demo version loads from mock_survey_data.csv instead of Google Sheets
+    const SHEET_URL = 'mock_survey_data.csv';  // Local mock data file
     // -------------------------------------------------------
 
     let rawResponses = [];
@@ -388,10 +389,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchCustomerData() {
         try {
-            console.log('🔍 [DEBUG] Starting to load customer_data.csv...');
-            // Add timestamp to prevent caching
+            console.log('🔍 [DEMO] Loading mock_customer_data.csv...');
+            // Load from local mock file instead of customer_data.csv
             const timestamp = new Date().getTime();
-            const response = await fetch(`customer_data.csv?t=${timestamp}`);
+            const response = await fetch(`mock_customer_data.csv?t=${timestamp}`);
             if (!response.ok) {
                 console.warn('⚠️ [DEBUG] Could not load customer_data.csv, using defaults');
                 return;
