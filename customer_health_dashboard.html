@@ -79,6 +79,16 @@
                             <option value="custom">Custom Range</option>
                         </select>
                     </div>
+                    <div class="w-full sm:w-48">
+                        <label for="dateFormatFilter" class="text-sm font-medium text-gray-700 sr-only">Date
+                            Format</label>
+                        <select id="dateFormatFilter"
+                            class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
+                            <option value="us">US (12/31/23)</option>
+                            <option value="euro">Euro (31/12/23)</option>
+                            <option value="iso">ISO (2023-12-31)</option>
+                        </select>
+                    </div>
 
                     <div id="customRangeWrapper" class="hidden w-full sm:w-80 flex gap-4">
                         <div class="w-1/2">
@@ -245,6 +255,9 @@
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Date</th>
                                     <th scope="col"
                                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Company</th>

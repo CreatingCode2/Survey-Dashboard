@@ -5,6 +5,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const SHEET_URL = 'mock_survey_data.csv';  // Local mock data file
     // -------------------------------------------------------
 
+    // --- CONFIGURATION: DATE FORMATTING ---
+    const DATE_FORMATS = {
+        'us': { locale: 'en-US', options: { year: '2-digit', month: '2-digit', day: '2-digit', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' } }, // 12/31/23, 4:09 PM EST
+        'euro': { locale: 'en-GB', options: { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } }, // 31/12/2023, 16:09
+        'iso': { locale: 'sv-SE', options: { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } } // 2023-12-31 16:09
+    };
+    // ----------------------------------------
+
     let rawResponses = [];
     let triageDetails = {};
     let charts = {};
@@ -13,8 +21,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let state = {
         industry: 'all',
         date: 'all',
+        dateFormat: 'us',
         sort: 'newest'
     };
+    // ... [REMAINING CODE OMITTED FOR BREVITY, WILL TARGET SPECIFIC BLOCKS NEXT]
     let currentView = 'dashboard';
     const views = {
         dashboard: document.getElementById('view-dashboard'),
@@ -64,8 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'Can you refer any other organization you feel would benefit from our products and services? If yes, please list the organization(s) in the "Comment" box?': 'refer_org_Q32',
         'Can you refer any other organization you feel would benefit from our products and services? If yes, please list the organization(s) in the "Comment" box?  ': 'refer_org_Q32',
         'Are there any other details that you would like to provide?': 'other_details_Q34',
-        'Please provide any additional feedback or comments.': 'feedback_Q3',
-        'Please provide any additional feedback or comments.  ': 'feedback_Q3'
+        'Explain or provide additional feedback below': 'feedback_Q3'
     };
 
     // Feedback fields mapping
@@ -180,12 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const header = headers[j];
                 const value = (data[j] || '').trim();
 
-                if (header === 'Explain or provide additional feedback below') {
-                    feedbackCounter++;
-                    if (FEEDBACK_POSITIONS[feedbackCounter]) {
-                        row[FEEDBACK_POSITIONS[feedbackCounter]] = value;
-                    }
-                } else if (COLUMN_MAP[header]) {
+                if (COLUMN_MAP[header]) {
                     row[COLUMN_MAP[header]] = value;
                     if (COLUMN_MAP[header] === 'org_user_name_Q1' && value.length > 0) {
                         isValidRow = true;
@@ -609,7 +613,7 @@ document.addEventListener('DOMContentLoaded', () => {
     <h4 class="text-lg font-bold text-gray-800 mt-6 mb-3 border-b pb-2">All 34 Survey Questions & Responses</h4>
     <div class="space-y-4">
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q1: What is the name of your organization and the name of the person completing this survey?</p><p class="text-sm text-gray-700 p-2">${data.org_user_name_Q1 || 'N/A'}</p></div>
-        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q2: How has CLEAN_Address been working for your organization?</p><p class="text-sm text-gray-700 p-2">${data.health_raw_Q2 || 'N/A'}</p></div>
+        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q2: How has the product been working for your organization?</p><p class="text-sm text-gray-700 p-2">${data.health_raw_Q2 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q3: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q3 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q4: Do you feel you are getting a return on your investment?</p><p class="text-sm text-gray-700 p-2">${data.roi_raw_Q4 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q5: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q5 || 'N/A'}</p></div>
@@ -624,7 +628,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q14: Are you using Batch Processing included with your subscription?</p><p class="text-sm text-gray-700 p-2">${data.batch_proc_Q14 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q15: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q15 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q16: Do you have any plans for migration to the cloud?</p><p class="text-sm text-gray-700 p-2">${data.cloud_plan_Q16 || 'N/A'}</p></div>
-        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q17: Have you upgraded to CLEAN_Address version 5x?</p><p class="text-sm text-gray-700 p-2">${data.upgrade_5x_Q17 || 'N/A'}</p></div>
+        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q17: Have you upgraded to the latest version?</p><p class="text-sm text-gray-700 p-2">${data.upgrade_5x_Q17 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q17 Feedback: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q17 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q18: Are there any suggestions to improve our processes and help with customer success?</p><p class="text-sm text-gray-700 p-2">${data.suggestions_Q18 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q19: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q19 || 'N/A'}</p></div>
@@ -632,13 +636,13 @@ document.addEventListener('DOMContentLoaded', () => {
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q21: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q21 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q22: Would Demographic Data associated with address records be beneficial?</p><p class="text-sm text-gray-700 p-2">${data.demographic_Q22 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q23: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q23 || 'N/A'}</p></div>
-        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q24: Are there any other systems or departments that could use CLEAN_Address?</p><p class="text-sm text-gray-700 p-2">${data.other_systems_Q24 || 'N/A'}</p></div>
+        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q24: Are there any other systems or departments that could use our product?</p><p class="text-sm text-gray-700 p-2">${data.other_systems_Q24 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q25: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q25 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q26: Do you use Salesforce?</p><p class="text-sm text-gray-700 p-2">${data.salesforce_Q26 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q27: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q27 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q28: Do you use Microsoft Dynamics?</p><p class="text-sm text-gray-700 p-2">${data.ms_dynamics_Q28 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q29: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q29 || 'N/A'}</p></div>
-        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q30: Are you willing to be a reference for RunnerEDQ and CLEAN_Address?</p><p class="text-sm text-gray-700 p-2">${data.reference_Q30 || 'N/A'}</p></div>
+        <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q30: Are you willing to be a reference for us?</p><p class="text-sm text-gray-700 p-2">${data.reference_Q30 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q31: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q31 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q32: Can you refer any other organization you feel would benefit from our products and services?</p><p class="text-sm text-gray-700 p-2">${data.refer_org_Q32 || 'N/A'}</p></div>
         <div><p class="text-xs font-bold text-gray-600 bg-blue-50 p-2 rounded">Q33: Explain or provide additional feedback below</p><p class="text-sm text-gray-700 p-2">${data.feedback_Q33 || 'N/A'}</p></div>
@@ -866,6 +870,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const dateFormatEl = document.getElementById('dateFormatFilter');
+    if (dateFormatEl) {
+        dateFormatEl.addEventListener('change', (e) => {
+            state.dateFormat = e.target.value;
+            renderDataTable(getFilteredData());
+        });
+    }
+
     function getFilteredData() {
         let filtered = [...rawResponses];
 
@@ -938,7 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         scales: {
             x: {
-                title: { display: true, text: 'CLEAN_Address Score' },
+                title: { display: true, text: 'Customer Health Score' },
                 min: 0.5, max: 5.5, ticks: { stepSize: 1 }
             },
             y: {
@@ -952,7 +964,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function createCharts() {
         charts.healthTrend = new Chart(document.getElementById('healthTrendChart'), {
             type: 'line',
-            data: { labels: [], datasets: [{ label: 'Avg CLEAN_Address Score', data: [], borderColor: '#4A5C6A', backgroundColor: '#4A5C6A20', fill: true, tension: 0.3 }] },
+            data: { labels: [], datasets: [{ label: 'Avg Customer Health Score', data: [], borderColor: '#4A5C6A', backgroundColor: '#4A5C6A20', fill: true, tension: 0.3 }] },
             options: trendChartOptions
         });
 
@@ -1298,6 +1310,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function formatDate(dateString) {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+
+        const formatConfig = DATE_FORMATS[state.dateFormat] || DATE_FORMATS['us'];
+
+        if (state.dateFormat === 'iso') {
+            return date.toLocaleString('sv-SE', formatConfig.options);
+        }
+
+        return date.toLocaleString(formatConfig.locale, formatConfig.options);
+    }
+
     function renderDataTable(data) {
         const tableBody = document.getElementById('data-table-body');
         const drilldownContainer = document.getElementById('drilldown-status-bar-container');
@@ -1320,7 +1346,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tableBody.innerHTML = '';
         if (data.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="11" class="text-center py-10 text-gray-500">No data available for the selected filters.</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="12" class="text-center py-10 text-gray-500">No data available for the selected filters.</td></tr>`;
             return;
         }
 
@@ -1330,6 +1356,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const roiColorClass = d.roi === 5 ? 'text-green-600' : 'text-red-600';
 
             row.innerHTML = `
+        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${formatDate(d.date)}</td>
         <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${d.company}</td>
         <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold ${d.happiness <= 2 ? 'text-red-600' : d.happiness === 3 ? 'text-yellow-600' : 'text-green-600'}">${d.happiness}</td>
         <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-gray-700">${d.adoption}</td>

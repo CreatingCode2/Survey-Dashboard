@@ -4,6 +4,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ1y8hdlqfU4FCGquP0--BmDzHemCOHnN4w2qEUZtmdyXwxz/exec';
     // -------------------------------------------------------
 
+    // --- CONFIGURATION: DATE FORMATTING ---
+    const DATE_FORMATS = {
+        'us': { locale: 'en-US', options: { year: '2-digit', month: '2-digit', day: '2-digit', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' } }, // 12/31/23, 4:09 PM EST
+        'euro': { locale: 'en-GB', options: { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } }, // 31/12/2023, 16:09
+        'iso': { locale: 'sv-SE', options: { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } } // 2023-12-31 16:09
+    };
+    // ----------------------------------------
+
     let rawResponses = [];
     let triageDetails = {};
     let charts = {};
@@ -12,8 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let state = {
         industry: 'all',
         date: 'all',
+        dateFormat: 'us',
         sort: 'newest'
     };
+    // ... [REMAINING CODE OMITTED FOR BREVITY, WILL TARGET SPECIFIC BLOCKS NEXT]
     let currentView = 'dashboard';
     const views = {
         dashboard: document.getElementById('view-dashboard'),
@@ -838,6 +848,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const dateFormatEl = document.getElementById('dateFormatFilter');
+    if (dateFormatEl) {
+        dateFormatEl.addEventListener('change', (e) => {
+            state.dateFormat = e.target.value;
+            renderDataTable(getFilteredData());
+        });
+    }
+
     function getFilteredData() {
         let filtered = [...rawResponses];
 
@@ -1268,6 +1286,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function formatDate(dateString) {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+
+        const formatConfig = DATE_FORMATS[state.dateFormat] || DATE_FORMATS['us'];
+
+        if (state.dateFormat === 'iso') {
+            // sv-SE is a good proxy for ISO-like YYYY-MM-DD HH:MM
+            return date.toLocaleString('sv-SE', formatConfig.options);
+        }
+
+        return date.toLocaleString(formatConfig.locale, formatConfig.options);
+    }
+
     function renderDataTable(data) {
         const tableBody = document.getElementById('data-table-body');
         const drilldownContainer = document.getElementById('drilldown-status-bar-container');
@@ -1290,7 +1323,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tableBody.innerHTML = '';
         if (data.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="11" class="text-center py-10 text-gray-500">No data available for the selected filters.</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="12" class="text-center py-10 text-gray-500">No data available for the selected filters.</td></tr>`;
             return;
         }
 
@@ -1300,6 +1333,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const roiColorClass = d.roi === 5 ? 'text-green-600' : 'text-red-600';
 
             row.innerHTML = `
+        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${formatDate(d.date)}</td>
         <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${d.company}</td>
         <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold ${d.happiness <= 2 ? 'text-red-600' : d.happiness === 3 ? 'text-yellow-600' : 'text-green-600'}">${d.happiness}</td>
         <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-gray-700">${d.adoption}</td>

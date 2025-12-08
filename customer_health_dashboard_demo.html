@@ -80,6 +80,16 @@
                             <option value="custom">Custom Range</option>
                         </select>
                     </div>
+                    <div class="w-full sm:w-48">
+                        <label for="dateFormatFilter" class="text-sm font-medium text-gray-700 sr-only">Date
+                            Format</label>
+                        <select id="dateFormatFilter"
+                            class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
+                            <option value="us">US (12/31/23)</option>
+                            <option value="euro">Euro (31/12/23)</option>
+                            <option value="iso">ISO (2023-12-31)</option>
+                        </select>
+                    </div>
 
                     <div id="customRangeWrapper" class="hidden w-full sm:w-80 flex gap-4">
                         <div class="w-1/2">
@@ -101,7 +111,7 @@
             <section id="view-dashboard">
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                     <div class="kpi-card text-center">
-                        <h3 class="text-sm font-medium text-gray-500">CLEAN_Address Score</h3>
+                        <h3 class="text-sm font-medium text-gray-500">Customer Health Score</h3>
                         <p id="kpi-avg-happiness" class="mt-1 text-4xl font-bold text-[#4A5C6A]">N/A</p>
                     </div>
                     <div class="kpi-card text-center">
@@ -125,14 +135,14 @@
                 </div>
                 <div id="dashboard-content" class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden">
                     <div class="chart-card lg:col-span-2">
-                        <h2 class="text-lg font-semibold mb-1">CLEAN_Address Score Trend</h2>
+                        <h2 class="text-lg font-semibold mb-1">Customer Health Score Trend</h2>
                         <p class="text-sm text-gray-500 mb-4">Average score over time</p>
                         <div class="chart-container flex-grow">
                             <canvas id="healthTrendChart"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
-                        <h2 class="text-lg font-semibold mb-1">CLEAN_Address Score Distribution</h2>
+                        <h2 class="text-lg font-semibold mb-1">Customer Health Score Distribution</h2>
                         <p class="text-sm text-gray-500 mb-4">Click segment to filter Data Table</p>
                         <div class="chart-container flex-grow">
                             <canvas id="happinessChart"></canvas>
@@ -146,7 +156,7 @@
                         </div>
                     </div>
                     <div class="chart-card lg:col-span-2">
-                        <h2 class="text-lg font-semibold mb-1">CLEAN_Address Score vs. ROI Correlation</h2>
+                        <h2 class="text-lg font-semibold mb-1">Customer Health vs. ROI Correlation</h2>
                         <p class="text-sm text-gray-500 mb-4">Click cluster to filter Data Table</p>
                         <div class="chart-container flex-grow">
                             <canvas id="roiVsHappinessChart"></canvas>
@@ -248,6 +258,9 @@
                                 <tr>
                                     <th scope="col"
                                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Date</th>
+                                    <th scope="col"
+                                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Company</th>
                                     <th scope="col"
                                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -266,7 +279,7 @@
                                         Batch Use (Q14)</th>
                                     <th scope="col"
                                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        CLEAN File (Q12)</th>
+                                        File Processor (Q12)</th>
                                     <th scope="col" scope="col"
                                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         Cloud Plan (Q16)</th>
