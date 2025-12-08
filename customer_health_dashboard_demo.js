@@ -22,8 +22,30 @@ document.addEventListener('DOMContentLoaded', () => {
         industry: 'all',
         date: 'all',
         dateFormat: 'us',
+        timezone: 'local',
         sort: 'newest'
     };
+    let currentView = 'dashboard';
+    // ... (skipping unchanged code) ...
+    function formatDate(dateString) {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+
+        const formatConfig = DATE_FORMATS[state.dateFormat] || DATE_FORMATS['us'];
+        const options = { ...formatConfig.options }; // Create a copy to modify
+
+        // Apply timezone if not local
+        if (state.timezone && state.timezone !== 'local') {
+            options.timeZone = state.timezone;
+        }
+
+        if (state.dateFormat === 'iso') {
+            return date.toLocaleString('sv-SE', options);
+        }
+
+        return date.toLocaleString(formatConfig.locale, options);
+    }
     // ... [REMAINING CODE OMITTED FOR BREVITY, WILL TARGET SPECIFIC BLOCKS NEXT]
     let currentView = 'dashboard';
     const views = {
@@ -878,6 +900,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const timezoneEl = document.getElementById('timezoneFilter');
+    if (timezoneEl) {
+        timezoneEl.addEventListener('change', (e) => {
+            state.timezone = e.target.value;
+            renderDataTable(getFilteredData());
+        });
+    }
+
     function getFilteredData() {
         let filtered = [...rawResponses];
 
@@ -1316,12 +1346,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isNaN(date.getTime())) return dateString;
 
         const formatConfig = DATE_FORMATS[state.dateFormat] || DATE_FORMATS['us'];
+        const options = { ...formatConfig.options }; // Copy options
 
-        if (state.dateFormat === 'iso') {
-            return date.toLocaleString('sv-SE', formatConfig.options);
+        if (state.timezone && state.timezone !== 'local') {
+            options.timeZone = state.timezone;
         }
 
-        return date.toLocaleString(formatConfig.locale, formatConfig.options);
+        if (state.dateFormat === 'iso') {
+            return date.toLocaleString('sv-SE', options);
+        }
+
+        return date.toLocaleString(formatConfig.locale, options);
     }
 
     function renderDataTable(data) {
