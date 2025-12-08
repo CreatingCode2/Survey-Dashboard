@@ -313,12 +313,7 @@
                         notifications for new survey responses are configured separately in your email system.</p>
                 </div>
 
-                <h4 class="font-semibold text-gray-800 mb-3">Current CSMs:</h4>
-                <div id="csm-list" class="space-y-2 mb-6">
-                    <!-- CSM list will be populated here -->
-                </div>
-
-                <div class="border-t pt-4">
+                <div class="mb-6">
                     <h4 class="font-semibold text-gray-800 mb-3">Add New CSM:</h4>
                     <div class="flex gap-3">
                         <input type="text" id="new-csm-name" placeholder="CSM Name"
@@ -327,6 +322,14 @@
                             class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition text-sm">
                             Add CSM
                         </button>
+                    </div>
+                    <p id="csm-status-msg" class="text-sm mt-2 h-5"></p>
+                </div>
+
+                <div class="border-t pt-4">
+                    <h4 class="font-semibold text-gray-800 mb-3">Current CSMs:</h4>
+                    <div id="csm-list" class="space-y-2 mb-6">
+                        <!-- CSM list will be populated here -->
                     </div>
                 </div>
 

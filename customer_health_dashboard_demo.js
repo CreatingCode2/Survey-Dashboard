@@ -659,21 +659,10 @@ document.addEventListener('DOMContentLoaded', () => {
     window.showDetailsModal = (id) => {
         const record = rawResponses.find(d => d.id === id);
         if (record) {
-            openModal(record);
+            renderCsmList();
+            updateCsmDropdowns();
+            renderTriageList();
         }
-    };
-
-    window.openCsmManager = function () {
-        const modal = document.getElementById('csm-modal');
-        renderCsmList();
-        modal.classList.remove('invisible', 'opacity-0');
-        modal.classList.add('visible', 'opacity-100');
-    }
-
-    window.closeCsmModal = function () {
-        const modal = document.getElementById('csm-modal');
-        modal.classList.remove('visible', 'opacity-100');
-        modal.classList.add('invisible', 'opacity-0');
     }
 
     function renderCsmList() {
@@ -698,17 +687,50 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    window.openCsmManager = function () {
+        const modal = document.getElementById('csm-modal');
+        renderCsmList();
+        const statusMsg = document.getElementById('csm-status-msg');
+        if (statusMsg) statusMsg.textContent = '';
+
+        modal.classList.remove('invisible', 'opacity-0');
+        modal.classList.add('visible', 'opacity-100');
+
+        // Auto-focus the input field
+        setTimeout(() => {
+            const input = document.getElementById('new-csm-name');
+            if (input) input.focus();
+        }, 100);
+    }
+
     window.addNewCsm = function () {
         const input = document.getElementById('new-csm-name');
+        const statusMsg = document.getElementById('csm-status-msg');
         const name = input.value.trim();
 
+        // Helper to set status
+        const setStatus = (msg, isError = false) => {
+            if (statusMsg) {
+                statusMsg.textContent = msg;
+                statusMsg.className = isError ? 'text-sm mt-2 h-5 text-red-600 font-medium' : 'text-sm mt-2 h-5 text-green-600 font-medium';
+                // Auto clear after 3 seconds
+                setTimeout(() => {
+                    if (statusMsg.textContent === msg) {
+                        statusMsg.textContent = '';
+                    }
+                }, 3000);
+            }
+        };
+
         if (name === '') {
-            alert('Please enter a CSM name');
+            setStatus('Please enter a CSM name', true);
+            input.focus();
             return;
         }
 
         if (CSMs.includes(name)) {
-            alert('This CSM already exists');
+            setStatus('This CSM already exists', true);
+            input.focus();
             return;
         }
 
@@ -716,8 +738,11 @@ document.addEventListener('DOMContentLoaded', () => {
         input.value = '';
         renderCsmList();
         updateCsmDropdowns();
-        alert(`CSM "${name}" added successfully!`);
+        setStatus(`CSM "${name}" added successfully!`);
+        input.focus();
     }
+
+
 
     window.removeCsm = function (index) {
         const csmName = CSMs[index];
