@@ -1403,28 +1403,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const manageCsmsBtn = document.getElementById('manage-csms-btn');
         if (manageCsmsBtn) {
+            // Remove any existing listeners by cloning or just use addEventListener since we fixed openCsmManager
             manageCsmsBtn.addEventListener('click', window.openCsmManager);
         }
 
         const addCsmBtn = document.getElementById('add-csm-btn');
         if (addCsmBtn) {
-            console.log('Attaching Add CSM button listener');
-            addCsmBtn.addEventListener('click', function () {
-                console.log('Add CSM button clicked');
-                window.addNewCsm();
-            });
+            addCsmBtn.addEventListener('click', window.addNewCsm);
         }
+    }
 
-        // Add Enter key support for CSM Name input
-        const newCsmInput = document.getElementById('new-csm-name');
-        if (newCsmInput) {
-            newCsmInput.addEventListener('keypress', function (e) {
-                if (e.key === 'Enter') {
-                    console.log('Enter key pressed in CSM input');
-                    window.addNewCsm();
-                }
-            });
+    // --- Global Helpers for HTML onclick attributes ---
+    window.closeCsmModal = function () {
+        const modal = document.getElementById('csm-modal');
+        modal.classList.remove('visible', 'opacity-100');
+        modal.classList.add('invisible', 'opacity-0');
+    }
+
+    // Explicitly expose logging/interaction for debugging
+    window.triggerLogin = function () {
+        if (!isLoggedIn) {
+            window.promptLogin();
         }
+    }
+
+    // Add Enter key support for CSM Name input
+    const newCsmInput = document.getElementById('new-csm-name');
+    if (newCsmInput) {
+        newCsmInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                console.log('Enter key pressed in CSM input');
+                window.addNewCsm();
+            }
+        });
     }
 
     init();
