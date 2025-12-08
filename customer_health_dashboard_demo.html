@@ -25,11 +25,11 @@
                 <p class="mt-2 text-lg text-gray-600">Demo version with sample data for demonstration purposes.</p>
             </div>
             <div class="flex gap-3">
-                <button onclick="openCsmManager()"
+                <button id="manage-csms-btn" type="button"
                     class="px-4 py-2 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition shadow-md text-sm">
                     Manage CSMs
                 </button>
-                <button id="login-btn" onclick="promptLogin()"
+                <button id="login-btn" type="button"
                     class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition shadow-md text-sm">
                     Login for Editing
                 </button>
@@ -323,7 +323,7 @@
                     <div class="flex gap-3">
                         <input type="text" id="new-csm-name" placeholder="CSM Name"
                             class="flex-1 rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
-                        <button onclick="addNewCsm()"
+                        <button id="add-csm-btn" type="button"
                             class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition text-sm">
                             Add CSM
                         </button>

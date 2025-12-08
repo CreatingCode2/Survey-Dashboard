@@ -552,7 +552,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateUIForAuth() {
         const loginBtn = document.getElementById('login-btn');
         loginBtn.textContent = isLoggedIn ? `Logged in: ${currentUser.name}` : 'Login for Editing';
-        loginBtn.onclick = isLoggedIn ? null : promptLogin;
+        // loginBtn.onclick handler removed to avoid conflict with addEventListener
         loginBtn.classList.toggle('bg-indigo-600', !isLoggedIn);
         loginBtn.classList.toggle('bg-gray-400', isLoggedIn);
         loginBtn.disabled = isLoggedIn;
@@ -1362,6 +1362,26 @@ document.addEventListener('DOMContentLoaded', () => {
         createCharts();
         updateUIForAuth();
         navigateTo('dashboard');
+
+        // Attach event listeners to buttons
+        const loginBtn = document.getElementById('login-btn');
+        if (loginBtn) {
+            loginBtn.addEventListener('click', function () {
+                if (!isLoggedIn) {
+                    promptLogin();
+                }
+            });
+        }
+
+        const manageCsmsBtn = document.getElementById('manage-csms-btn');
+        if (manageCsmsBtn) {
+            manageCsmsBtn.addEventListener('click', openCsmManager);
+        }
+
+        const addCsmBtn = document.getElementById('add-csm-btn');
+        if (addCsmBtn) {
+            addCsmBtn.addEventListener('click', addNewCsm);
+        }
     }
 
     init();
