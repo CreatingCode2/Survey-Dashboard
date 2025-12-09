@@ -46,8 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return date.toLocaleString(formatConfig.locale, options);
     }
-    // ... [REMAINING CODE OMITTED FOR BREVITY, WILL TARGET SPECIFIC BLOCKS NEXT]
-    let currentView = 'dashboard';
+
     const views = {
         dashboard: document.getElementById('view-dashboard'),
         triage: document.getElementById('view-triage'),
