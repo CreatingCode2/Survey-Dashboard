@@ -51,8 +51,8 @@
                         class="nav-button px-4 py-2 text-sm font-semibold rounded-md w-full md:w-auto">Data
                         Table</button>
                 </nav>
-                <div class="flex flex-col sm:flex-row gap-4 flex-wrap">
-                    <div class="w-full sm:w-48">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
+                    <div class="w-full">
                         <label for="tierFilter" class="text-sm font-medium text-gray-700 sr-only">Customer
                             Industry</label>
                         <select id="tierFilter"
@@ -66,7 +66,7 @@
                             <option value="Education">Education</option>
                         </select>
                     </div>
-                    <div class="w-full sm:w-48">
+                    <div class="w-full">
                         <label for="dateFilter" class="text-sm font-medium text-gray-700 sr-only">Date Range</label>
                         <select id="dateFilter"
                             class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
@@ -80,7 +80,7 @@
                             <option value="custom">Custom Range</option>
                         </select>
                     </div>
-                    <div class="w-full sm:w-48">
+                    <div class="w-full">
                         <label for="dateFormatFilter" class="text-sm font-medium text-gray-700 sr-only">Date
                             Format</label>
                         <select id="dateFormatFilter"
@@ -90,7 +90,7 @@
                             <option value="iso">ISO (2023-12-31)</option>
                         </select>
                     </div>
-                    <div class="w-full sm:w-48">
+                    <div class="w-full">
                         <label for="timezoneFilter" class="text-sm font-medium text-gray-700 sr-only">Timezone</label>
                         <select id="timezoneFilter"
                             class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm">
@@ -103,7 +103,7 @@
                         </select>
                     </div>
 
-                    <div id="customRangeWrapper" class="hidden w-full sm:w-80 flex gap-4">
+                    <div id="customRangeWrapper" class="hidden w-full col-span-1 sm:col-span-2 flex gap-4">
                         <div class="w-1/2">
                             <label for="startDate" class="text-xs font-medium text-gray-500 block">Start Date</label>
                             <input type="date" id="startDate"
@@ -116,6 +116,7 @@
                         </div>
                     </div>
                 </div>
+
             </div>
         </div>
 
@@ -226,7 +227,8 @@
                         </div>
                         <div class="w-full">
                             <label for="triageStatusFilter"
-                                class="text-xs font-medium text-gray-500 uppercase">Follow-up Status</label>
+                                class="text-xs font-medium text-gray-500 uppercase">Follow-up
+                                Status</label>
                             <select id="triageStatusFilter"
                                 class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mt-1">
                                 <option value="all">All Active Statuses</option>
