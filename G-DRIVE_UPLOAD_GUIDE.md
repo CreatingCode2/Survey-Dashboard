@@ -27,6 +27,13 @@ You'll upload these essential files from your `Survey Dashboard` folder:
 - Python scripts (`*.py` files)
 - Backup CSV files
 
+### ⚠️ CRITICAL: Check File Names Before Uploading
+**Do not upload files with `[1]` or `(1)` in their names.**
+- ❌ Bad: `customer_health_dashboard[1].js`
+- ✅ Good: `customer_health_dashboard.js`
+
+If you upload a file with `[1]`, **it will be broken for everyone** who downloads it. Rename them on your computer *first* to remove the numbers, then upload.
+
 ### 2. Upload to Google Drive
 
 **Option A: Upload Selected Files** (Recommended)

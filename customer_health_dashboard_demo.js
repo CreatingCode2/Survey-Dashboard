@@ -26,7 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
         sort: 'newest'
     };
     let currentView = 'dashboard';
-    // ... (skipping unchanged code) ...
     function formatDate(dateString) {
         if (!dateString) return 'N/A';
         const date = new Date(dateString);
@@ -1440,10 +1439,69 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
+
         if (triageStatusFilter) {
             triageStatusFilter.addEventListener('change', function (e) {
                 triageState.status = e.target.value;
                 renderTriageList();
+            });
+        }
+
+        // --- DASHBOARD FILTERS ---
+        const tierFilter = document.getElementById('tierFilter');
+        const dateFilter = document.getElementById('dateFilter');
+        const dateFormatFilter = document.getElementById('dateFormatFilter');
+        const timezoneFilter = document.getElementById('timezoneFilter');
+        const customRangeWrapper = document.getElementById('customRangeWrapper');
+        const startDateInput = document.getElementById('startDate');
+        const endDateInput = document.getElementById('endDate');
+
+        if (tierFilter) {
+            tierFilter.addEventListener('change', (e) => {
+                state.industry = e.target.value;
+                updateDashboard();
+            });
+        }
+
+        if (dateFilter) {
+            dateFilter.addEventListener('change', (e) => {
+                state.date = e.target.value;
+                if (state.date === 'custom') {
+                    customRangeWrapper.classList.remove('hidden');
+                } else {
+                    customRangeWrapper.classList.add('hidden');
+                    state.customStart = null;
+                    state.customEnd = null;
+                }
+                updateDashboard();
+            });
+        }
+
+        if (dateFormatFilter) {
+            dateFormatFilter.addEventListener('change', (e) => {
+                state.dateFormat = e.target.value;
+                renderDataTable(getFilteredData()); // Only re-render table for format change
+            });
+        }
+
+        if (timezoneFilter) {
+            timezoneFilter.addEventListener('change', (e) => {
+                state.timezone = e.target.value;
+                renderDataTable(getFilteredData()); // Only re-render table for format change
+            });
+        }
+
+        if (startDateInput) {
+            startDateInput.addEventListener('change', (e) => {
+                state.customStart = e.target.value;
+                if (state.date === 'custom') updateDashboard();
+            });
+        }
+
+        if (endDateInput) {
+            endDateInput.addEventListener('change', (e) => {
+                state.customEnd = e.target.value;
+                if (state.date === 'custom') updateDashboard();
             });
         }
 

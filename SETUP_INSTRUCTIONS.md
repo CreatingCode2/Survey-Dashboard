@@ -72,8 +72,59 @@ This will help you get the most value from the dashboard!
 - Try a different browser (Chrome recommended)
 
 **Data looks incorrect**
-- Refresh the page to load latest data
-- Contact Misty Wilmore if issues persist
+    - Refresh the page to load latest data
+    - Contact Misty Wilmore if issues persist
+    
+    **"Syntax Error" or "Windows Script Host" popup**
+    - 🛑 **STOP:** You tried to run the `.js` file directly. 
+    - **FIX:** Close that error. Double-click the orange/blue `customer_health_dashboard.html` icon instead. The JS file runs *automatically* inside the HTML.
+    
+    **"Failed to load resource: net::ERR_FILE_NOT_FOUND"**
+    - **CAUSE:** Your computer renamed the file because you downloaded it twice (e.g., `customer_health_dashboard[1].js`).
+    - **FIX:** Rename the file back to `customer_health_dashboard.js` (remove the `[1]`). Ensure all files are in the *same* folder.
+
+**Need to run a local server?**
+    - **NOTE:** The dashboard works by double-clicking the HTML file - no server required!
+    - **However**, if you need to run a local Python server for testing:
+    
+    **Starting the server:**
+    - Open Command Prompt or Terminal
+    - Navigate to the dashboard folder: `cd "path\to\Survey Dashboard"`
+    - Run one of these commands (you can choose any port number):
+      - **Python 3**: `python -m http.server [PORT]`
+      - **Python 2**: `python -m SimpleHTTPServer [PORT]`
+    - **Common port numbers:** 8000, 8080, 8083, 3000, 5000
+      - Example: `python -m http.server 8080`
+      - Example: `python -m http.server 8083`
+    - You'll see output like: `Serving HTTP on 0.0.0.0 port 8080 (http://0.0.0.0:8080/) ...`
+      - The **port number** is always shown in this message
+    - Open your browser and **type the URL** using your chosen port:
+      - For port 8080: `http://localhost:8080/customer_health_dashboard.html`
+      - For port 8083: `http://localhost:8083/customer_health_dashboard.html`
+    
+    **Restarting the server:**
+    - Press `Ctrl+C` in the Command Prompt window to stop the server
+    - Run the same command again to restart (e.g., `python -m http.server 8080`)
+    - The terminal will again show: `Serving HTTP on 0.0.0.0 port 8080...`
+    - **Refresh your browser** (F5) or **type the URL again** with the correct port
+    
+    **Stopping the server:**
+    - Press `Ctrl+C` in the Command Prompt window
+    
+    **💡 TIP:** Keep the Command Prompt window open while using the dashboard. If you close it, the server stops!
+
+### 🔄 THE "NUCLEAR" FIX (Solves All Name/Error Issues)
+**Attempt this if you cannot rename the files or keep getting errors.**
+If Windows says "File in Use" or won't let you rename, it's because the file is open or stuck.
+
+1.  Go to your **Desktop**.
+2.  Right-click -> New -> Folder. Name it **"Dashboard_Clean"**.
+3.  Go to your downloads and open the ZIP file you just downloaded.
+4.  **Drag and Drop** the files from the ZIP directly into your new **"Dashboard_Clean"** folder.
+    *   *Do not* just click "Extract". Use the drag-and-drop method.
+5.  Open the "Dashboard_Clean" folder and double-click the HTML file.
+
+This bypasses all "file already exists" or "renaming" errors because the folder is perfectly empty.
 
 ### Files Included
 
