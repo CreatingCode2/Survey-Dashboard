@@ -133,7 +133,7 @@ def generate_customer_master_data(num_companies):
         })
     
     # Write to CSV
-    with open('mock_customer_data.csv', 'w', newline='', encoding='utf-8') as f:
+    with open('../mock_customer_data.csv', 'w', newline='', encoding='utf-8') as f:
         fieldnames = ['Company', 'Domain', 'Address', 'City', 'State', 'Industry', 'ERP']
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -229,7 +229,7 @@ def generate_survey_responses(num_responses, companies, months=12):
     responses.sort(key=lambda x: datetime.strptime(x['Timestamp'], '%m/%d/%Y %H:%M:%S'))
     
     # Write to CSV
-    with open('mock_survey_data.csv', 'w', newline='', encoding='utf-8') as f:
+    with open('../mock_survey_data.csv', 'w', newline='', encoding='utf-8') as f:
         fieldnames = list(responses[0].keys())
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
