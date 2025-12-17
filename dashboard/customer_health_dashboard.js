@@ -448,15 +448,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Use proper CSV parsing to handle quoted fields
                 const parts = parseCSVLine(line);
-                if (parts.length >= 7) {
+                if (parts.length >= 5) {
                     const companyOriginal = parts[0].trim();
-                    const domain = parts[1].trim().toLowerCase();
-                    const industry = parts[5].trim();
-                    const erp = parts[6].trim();
+                    const urlOriginal = parts[1].trim();
+                    const industry = parts[3].trim();
+                    const erp = parts[4].trim();
+
+                    // Helper to clean domain (remove http://, www., and paths)
+                    const cleanDomain = (url) => {
+                        if (!url) return '';
+                        let domain = url.toLowerCase();
+                        domain = domain.replace(/^https?:\/\//, ''); // Remove protocol
+                        domain = domain.replace(/^www\./, '');       // Remove www.
+                        domain = domain.split('/')[0];               // Remove path
+                        return domain;
+                    };
+
+                    const domain = cleanDomain(urlOriginal);
 
                     // Log first few entries for verification
                     if (i <= 3) {
-                        console.log(`📊 [DEBUG] Row ${i}: Company="${companyOriginal}", Domain="${domain}", Industry="${industry}", ERP="${erp}"`);
+                        console.log(`📊 [DEBUG] Row ${i}: Company="${companyOriginal}", URL="${urlOriginal}" -> Domain="${domain}", Industry="${industry}", ERP="${erp}"`);
                     }
 
                     // Index by domain for email matching
@@ -900,7 +912,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (drillDownState.active && currentView === 'data') {
-            filtered = filtered.filter(d => d[drillDownState.key] === drillDownState.value);
+            const initialCount = filtered.length;
+            if (drillDownState.key === 'erp') {
+                console.log(`🔍 [FILTER DEBUG] Filtering by ERP: "${drillDownState.value}"`);
+                // Handle multi-value ERP fields (e.g., "SAP, Oracle")
+                filtered = filtered.filter(d => {
+                    if (!d.erp) return false;
+                    const erps = d.erp.split(',').map(e => e.trim());
+                    const match = erps.includes(drillDownState.value);
+                    if (match && d.erp.includes(',')) console.log(`   ✅ Matched multi-value ERP: "${d.company}" [${d.erp}]`);
+                    return match;
+                });
+            } else {
+                filtered = filtered.filter(d => d[drillDownState.key] === drillDownState.value);
+            }
+            console.log(`🔍 [FILTER DEBUG] Result: ${filtered.length} / ${initialCount} rows`);
         }
 
         // Sort by date descending (newest first) for the table and general view

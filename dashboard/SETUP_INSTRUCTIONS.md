@@ -88,25 +88,27 @@ This will help you get the most value from the dashboard!
     - **However**, if you need to run a local Python server for testing:
     
     **Starting the server:**
-    - Open Command Prompt or Terminal
-    - Navigate to the dashboard folder: `cd "path\to\Survey Dashboard"`
-    - Run one of these commands (you can choose any port number):
-      - **Python 3**: `python -m http.server [PORT]`
-      - **Python 2**: `python -m SimpleHTTPServer [PORT]`
-    - **Common port numbers:** 8000, 8080, 8083, 3000, 5000
-      - Example: `python -m http.server 8080`
-      - Example: `python -m http.server 8083`
-    - You'll see output like: `Serving HTTP on 0.0.0.0 port 8080 (http://0.0.0.0:8080/) ...`
-      - The **port number** is always shown in this message
-    - Open your browser and **type the URL** using your chosen port:
-      - For port 8080: `http://localhost:8080/customer_health_dashboard.html`
-      - For port 8083: `http://localhost:8083/customer_health_dashboard.html`
+    1. Open Command Prompt or PowerShell
+    2. Navigate to the dashboard folder:
+       ```powershell
+       cd "C:\Users\mwilmore\Documents\GitHub\Survey Dashboard\dashboard"
+       ```
+    3. Start the Python HTTP server:
+       ```powershell
+       python -m http.server 8080
+       ```
+    4. You'll see output like: `Serving HTTP on :: port 8080 (http://[::]:8080/) ...`
+    5. Open your browser and go to: `http://localhost:8080/customer_health_dashboard.html`
+    
+    **Alternative port numbers:**
+    - You can use any port (8000, 8080, 8083, 3000, 5000, etc.)
+    - Example with port 8083: `python -m http.server 8083`
+    - Then open: `http://localhost:8083/customer_health_dashboard.html`
     
     **Restarting the server:**
     - Press `Ctrl+C` in the Command Prompt window to stop the server
-    - Run the same command again to restart (e.g., `python -m http.server 8080`)
-    - The terminal will again show: `Serving HTTP on 0.0.0.0 port 8080...`
-    - **Refresh your browser** (F5) or **type the URL again** with the correct port
+    - Run the same command again to restart: `python -m http.server 8080`
+    - **Refresh your browser** (F5) or type the URL again
     
     **Stopping the server:**
     - Press `Ctrl+C` in the Command Prompt window
