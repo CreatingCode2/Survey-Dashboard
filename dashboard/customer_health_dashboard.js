@@ -1,7 +1,9 @@
+// --- CONFIGURATION: GOOGLE APPS SCRIPT WEB APP URL (global so all functions can access it) ---
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ1y8hdlqfU4FCGquP0--BmDzHemCOHnN4w2qEUZtmdyXwxz/exec';
+// -------------------------------------------------------
+
 document.addEventListener('DOMContentLoaded', () => {
 
-    // --- CONFIGURATION: GOOGLE APPS SCRIPT WEB APP URL ---
-    const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ1y8hdlqfU4FCGquP0--BmDzHemCOHnN4w2qEUZtmdyXwxz/exec';
     // -------------------------------------------------------
 
     // --- CONFIGURATION: DATE FORMATTING ---
@@ -16,6 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let triageDetails = {};
     let charts = {};
     let customerMasterData = {}; // Store loaded CSV data
+    let freshdeskData = [];
+    let engagementBlackoutCustomers = [];
 
     let state = {
         industry: 'all',
@@ -55,6 +59,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const INDUSTRIES = ['Finance', 'Healthcare', 'Retail', 'Manufacturing', 'Technology', 'Education'];
     let CSMs = ['Misty Wilmore', 'Tonja Jones']; // Now mutable so we can add/remove
+    // AUTHORIZED USERS: only these emails are allowed to edit. Role: 'admin' or 'csm'
+    const AUTHORIZED_USERS = [
+        { name: 'Misty Wilmore', email: 'misty.wilmore@runnertechnologies.com', role: 'admin' },
+        { name: 'Tonja Jones',   email: 'tonja.jones@runnertechnologies.com',   role: 'csm'   }
+    ];
     const ALL_STATUS_OPTIONS = ['New Response', 'Followed Up - Low Risk', 'Followed Up - High Risk', 'Archived'];
 
     const COLUMN_MAP = {
@@ -420,12 +429,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchCustomerData() {
         try {
-            console.log('🔍 [DEBUG] Starting to load customer_data.csv...');
-            // Add timestamp to prevent caching
             const timestamp = new Date().getTime();
-            const response = await fetch(`customer_data.csv?t=${timestamp}`);
+            const fetchUrl = `customer_data.csv?t=${timestamp}`;
+            console.log(`🔍 [DEBUG] Attempting fetch: ${window.location.origin}/${fetchUrl}`);
+            
+            const response = await fetch(fetchUrl);
             if (!response.ok) {
-                console.warn('⚠️ [DEBUG] Could not load customer_data.csv, using defaults');
+                console.warn(`⚠️ [DEBUG] Could not load customer_data.csv (Status: ${response.status}), using defaults`);
                 return;
             }
 
@@ -552,13 +562,68 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`✅ [DEBUG] Data loaded successfully: ${rawResponses.length} responses`);
             console.log('═══════════════════════════════════════════════════\n');
 
-            // Summary statistics
-            const unknownIndustry = rawResponses.filter(r => r.industry === 'Unknown').length;
-            const unknownErp = rawResponses.filter(r => r.erp === 'Unknown').length;
-            console.log(`📈 [DEBUG] Summary:`);
-            console.log(`   - Total responses: ${rawResponses.length}`);
-            console.log(`   - Unknown Industry: ${unknownIndustry} (${((unknownIndustry / rawResponses.length) * 100).toFixed(1)}%)`);
-            console.log(`   - Unknown ERP: ${unknownErp} (${((unknownErp / rawResponses.length) * 100).toFixed(1)}%)`);
+            console.log('\n📊 [DEBUG] Step 3: Fetching Freshdesk data...');
+            try {
+                const fdResponse = await fetch(SHEET_URL + '?type=freshdesk');
+                if (fdResponse.ok) {
+                    const fdCsv = await fdResponse.text();
+                    const fdLines = fdCsv.trim().split('\n');
+                    for (let i = 1; i < fdLines.length; i++) {
+                        const parts = parseCSVLine(fdLines[i]);
+                        if (parts.length >= 2) {
+                            freshdeskData.push({ company: parts[0], lastTicketDate: parts[1], companyId: parts[2] || '' });
+                        }
+                    }
+                    console.log(`✅ [DEBUG] Loaded ${freshdeskData.length} Freshdesk ticket records.`);
+                }
+            } catch(e) { console.warn("⚠️ Freshdesk fetch failed", e); }
+            
+            console.log('\n📊 [DEBUG] Step 4: Fetching Triage Data...');
+            try {
+                const trResponse = await fetch(SHEET_URL + '?type=triage');
+                if (trResponse.ok) {
+                    const trCsv = await trResponse.text();
+                    const trLines = trCsv.trim().split('\n');
+                    for (let i = 1; i < trLines.length; i++) {
+                        const parts = parseCSVLine(trLines[i]);
+                        if (parts.length >= 6) {
+                            const uId = parts[0];
+                            const comp = parts[1];
+                            const field = parts[2];
+                            const val = parts[3];
+                            const ts = parts[4];
+                            const u = parts[5];
+                            const noteStr = parts[6] || "";
+                            
+                            if (!triageDetails[uId]) {
+                                triageDetails[uId] = { assignedCsm: 'Unassigned', status: 'New Response', history: [] };
+                            }
+                            if (field === 'csm') triageDetails[uId].assignedCsm = val;
+                            if (field === 'status') triageDetails[uId].status = val;
+                            
+                            triageDetails[uId].history.push({
+                                status: triageDetails[uId].status,
+                                csm: triageDetails[uId].assignedCsm,
+                                timestamp: ts,
+                                user: u,
+                                change: noteStr ? `${field} updated to ${val}\nNote: ${noteStr}` : `${field} updated to ${val}`
+                            });
+                        }
+                    }
+                    console.log(`✅ [DEBUG] Loaded Triage Database history.`);
+                }
+            } catch(e) { console.warn("⚠️ Triage fetch failed", e); }
+
+            // Apply persistent triage history to raw responses
+            rawResponses = rawResponses.map(r => {
+                const uId = r.uniqueId;
+                if (triageDetails[uId]) {
+                    return { ...r, ...triageDetails[uId] };
+                }
+                return r;
+            });
+
+            calculateEngagementBlackout();
 
             dashboardContent.classList.remove('hidden');
 
@@ -579,34 +644,409 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function calculateEngagementBlackout() {
+        engagementBlackoutCustomers = [];
+        
+        const surveyedCompanyNames = new Set(rawResponses.map(r => r.company.toLowerCase()));
+        
+        const uniqueMasterCompanies = {};
+        for (const key in customerMasterData) {
+            const master = customerMasterData[key];
+            if (!uniqueMasterCompanies[master.name]) {
+                uniqueMasterCompanies[master.name] = master;
+            }
+        }
+        
+        const now = new Date();
+        
+        // Seed the Round-Robin tracker before the loop
+        let currentRoundRobinCsm = 'Tonja Jones';
+        const currentAssignedGlobal = Object.values(triageDetails).map(t => t.assignedCsm).filter(c => c && c !== 'Unassigned');
+        if (currentAssignedGlobal.length > 0) {
+            currentRoundRobinCsm = currentAssignedGlobal[currentAssignedGlobal.length - 1]; // seed with history
+        }
+        
+        for (const companyName in uniqueMasterCompanies) {
+            const master = uniqueMasterCompanies[companyName];
+            
+            if (surveyedCompanyNames.has(master.name.toLowerCase())) {
+                continue;
+            }
+            
+            const fdEntry = freshdeskData.find(f => f.company.toLowerCase() === master.name.toLowerCase());
+            let daysSinceLastTicket = Infinity;
+            let lastTicketFormatted = 'Never';
+            
+            if (fdEntry && fdEntry.lastTicketDate) {
+                const ticketDate = new Date(fdEntry.lastTicketDate);
+                if (!isNaN(ticketDate.getTime())) {
+                    daysSinceLastTicket = (now - ticketDate) / (24 * 60 * 60 * 1000);
+                    lastTicketFormatted = ticketDate.toLocaleDateString();
+                }
+            }
+            
+            if (daysSinceLastTicket > 90) {
+                let group = '';
+                if (daysSinceLastTicket === Infinity || daysSinceLastTicket > 365) group = '365+ Days / Never (Critical)';
+                else if (daysSinceLastTicket > 180) group = '180-365 Days (Risk)';
+                else group = '90-180 Days (Warning)';
+                
+                let uniqueId = master.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                
+                let assignedCsm = 'Unassigned';
+                let status = 'New Response';
+                if (triageDetails[uniqueId]) {
+                    assignedCsm = triageDetails[uniqueId].assignedCsm;
+                    status = triageDetails[uniqueId].status;
+                    
+                    // Snooze logic
+                    if (triageDetails[uniqueId].snoozeUntil) {
+                        const snoozeDate = new Date(triageDetails[uniqueId].snoozeUntil);
+                        if (now < snoozeDate) {
+                             continue; // Skip this company, it's currently snoozed
+                        }
+                    }
+                } else {
+                    // Round Robin Assignment using state tracker
+                    let nextCsm = 'Misty Wilmore';
+                    if (CSMs && CSMs.length > 0) {
+                        const lastIndex = CSMs.indexOf(currentRoundRobinCsm);
+                        if (lastIndex !== -1 && lastIndex + 1 < CSMs.length) {
+                             nextCsm = CSMs[lastIndex + 1];
+                        } else {
+                             nextCsm = CSMs[0];
+                        }
+                    } else if (currentRoundRobinCsm === 'Misty Wilmore') {
+                        nextCsm = 'Tonja Jones';
+                    }
+                    currentRoundRobinCsm = nextCsm; // Update loop tracker
+                    
+                    triageDetails[uniqueId] = { assignedCsm: nextCsm, status: 'New Response', history: [] };
+                    assignedCsm = nextCsm;
+                    
+                    if (isLoggedIn) {
+                        setTimeout(() => handleTriageUpdate(uniqueId, 'csm', nextCsm, true), Math.random() * 2000 + 1000);
+                    }
+                }
+
+                engagementBlackoutCustomers.push({
+                    id: 'bo_' + Math.random().toString(36).substr(2, 9),
+                    uniqueId: uniqueId,
+                    company: master.name,
+                    industry: master.industry,
+                    erp: master.erp,
+                    daysSinceLastTicket: daysSinceLastTicket === Infinity ? Infinity : Math.round(daysSinceLastTicket),
+                    lastTicketFormatted: lastTicketFormatted,
+                    group: group,
+                    assignedCsm: assignedCsm,
+                    status: status
+                });
+            }
+        }
+        
+        engagementBlackoutCustomers.sort((a, b) => {
+            if (a.daysSinceLastTicket === Infinity && b.daysSinceLastTicket === Infinity) return 0;
+            if (a.daysSinceLastTicket === Infinity) return -1;
+            if (b.daysSinceLastTicket === Infinity) return 1;
+            return b.daysSinceLastTicket - a.daysSinceLastTicket;
+        });
+        
+        const severeItems = engagementBlackoutCustomers.filter(c => c.daysSinceLastTicket === Infinity || c.daysSinceLastTicket > 180);
+        document.getElementById('kpi-blackout').textContent = severeItems.length;
+        document.getElementById('blackout-count-badge').textContent = severeItems.length;
+        
+        renderBlackoutList();
+    }
+
+    function renderBlackoutList() {
+        const listEl = document.getElementById('blackout-list');
+        if (!listEl) return;
+        listEl.innerHTML = '';
+        
+        let severeItems = engagementBlackoutCustomers;
+        
+        if (triageState.blackoutRisk && triageState.blackoutRisk !== 'all') {
+            severeItems = severeItems.filter(c => c.group === triageState.blackoutRisk);
+        }
+        
+        const isEditingEnabled = isLoggedIn;
+
+        let filteredItems = severeItems;
+        if (triageState.blackoutFollowUpOnly) {
+            filteredItems = filteredItems.filter(item => {
+                const status = getFollowUpStatus(item);
+                return status && (status.level === 'warning' || status.level === 'critical');
+            });
+        }
+        
+        if (filteredItems.length === 0) {
+            listEl.innerHTML = '<div class="text-center py-10"><p class="text-gray-600 font-medium">No accounts match your follow-up filters.</p></div>';
+            return;
+        }
+
+        filteredItems.forEach(item => {
+            const followUp = getFollowUpStatus(item);
+            let badgeHtml = '';
+            if (followUp) {
+                const dayLabel = followUp.days === 0 ? 'NEW' : `${followUp.days}d`;
+                if (followUp.level === 'critical') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded animate-pulse">🔴 FOLLOW-UP (${dayLabel})</span>`;
+                else if (followUp.level === 'warning') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-orange-500 text-white text-[10px] font-bold rounded">🟠 FOLLOW-UP (${dayLabel})</span>`;
+            }
+
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-lg p-4 grid grid-cols-1 md:grid-cols-5 gap-4 items-center transition shadow-sm border border-gray-200';
+            
+            const displayDays = item.daysSinceLastTicket === Infinity ? 'Never' : item.daysSinceLastTicket + ' days ago';
+            
+            const emailSubject = encodeURIComponent("Checking in on your experience with CLEAN_Address");
+            const emailBody = encodeURIComponent("Hi there,\n\nWe noticed it's been a while since we last connected. We wanted to see how everything is going with CLEAN_Address and if you need any assistance from our team.\n\nBest,\nYour Customer Success Team");
+            const mailto = "mailto:?cc=misty.wilmore@runnertechnologies.com,tonja.jones@runnertechnologies.com&subject=" + emailSubject + "&body=" + emailBody;
+            
+            const csmOptions = CSMs.map(csm => `<option value="${csm}" ${item.assignedCsm === csm ? 'selected' : ''}>${csm}</option>`).join('');
+            const allStatusOptionsWithArchive = ALL_STATUS_OPTIONS.map(s => `<option value="${s}" ${item.status === s ? 'selected' : ''}>${s}</option>`).join('');
+            const isAdmin = isLoggedIn && currentUser.role === 'admin';
+            const alreadyAssigned = item.assignedCsm && item.assignedCsm !== 'Unassigned';
+            const assignedToMe = isLoggedIn && alreadyAssigned && item.assignedCsm.toLowerCase() === currentUser.name.toLowerCase();
+            // Admin: can do anything. CSM: can edit only own rows or self-assign unassigned. Viewer: nothing.
+            const canEdit = isLoggedIn && (isAdmin || assignedToMe || (!alreadyAssigned && currentUser.role === 'csm'));
+            const canAssign = isLoggedIn && (isAdmin || (!alreadyAssigned && currentUser.role === 'csm'));
+            const disabledEdit = canEdit ? '' : 'disabled';
+            const opacityEdit = canEdit ? '' : 'opacity-60 cursor-not-allowed';
+            const disabledAssign = canAssign ? '' : 'disabled';
+            const opacityAssign = canAssign ? '' : 'opacity-60 cursor-not-allowed';
+            
+            card.innerHTML = `
+                <div class="md:col-span-2">
+                    <p class="font-bold text-lg text-gray-800 flex items-center">${item.company}${badgeHtml}</p>
+                    <p class="text-sm text-gray-500">Industry: ${item.industry} | <span class="uppercase">ERP</span>: ${item.erp}</p>
+                </div>
+                <div class="flex items-center md:justify-center md:col-span-2">
+                    <span class="text-sm font-semibold px-3 py-1 bg-gray-100 text-gray-600 rounded-full">Last Ticket: ${displayDays}</span>
+                </div>
+                <div class="flex justify-start md:justify-end gap-2">
+                    <button onclick="openOutreachModal('${item.uniqueId}', '${item.company.replace(/'/g, "\\'")}')" class="inline-flex items-center px-3 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition text-sm shadow-sm cursor-pointer whitespace-nowrap">
+                        <svg class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                        Outreach
+                    </button>
+                    <button onclick="openSnoozeModal('${item.uniqueId}')" class="px-3 py-2 bg-gray-200 text-gray-700 font-semibold rounded-lg hover:bg-gray-300 transition text-sm shadow-sm">
+                        Snooze
+                    </button>
+                </div>
+                <div class="col-span-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-t pt-4 mt-2 border-gray-100">
+                    <div class="sm:col-span-1 lg:col-span-2 px-2">
+                        <label for="bo-csm-${item.uniqueId}" class="text-xs font-medium text-gray-500">Assign CSM</label>
+                        <select ${disabledAssign} id="bo-csm-${item.uniqueId}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 text-sm ${opacityAssign}">
+                            <option value="Unassigned">Unassigned</option>
+                            ${csmOptions}
+                        </select>
+                    </div>
+                    <div class="sm:col-span-1 lg:col-span-2 px-2">
+                        <label for="bo-status-${item.uniqueId}" class="text-xs font-medium text-gray-500">Set Status</label>
+                        <select ${disabledEdit} id="bo-status-${item.uniqueId}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 text-sm ${opacityEdit}">
+                            ${allStatusOptionsWithArchive}
+                        </select>
+                    </div>
+                </div>
+            `;
+            listEl.appendChild(card);
+            
+            if (canAssign) {
+                const csmSelect = document.getElementById(`bo-csm-${item.uniqueId}`);
+                if (csmSelect) csmSelect.addEventListener('change', function () {
+                    // CSM role: only allow selecting themselves
+                    if (!isAdmin && this.value !== 'Unassigned' && this.value.toLowerCase() !== currentUser.name.toLowerCase()) {
+                        alert('You can only assign customers to yourself.');
+                        this.value = item.assignedCsm || 'Unassigned';
+                        return;
+                    }
+                    handleTriageUpdate(item.uniqueId, 'csm', this.value, true);
+                });
+            }
+            if (canEdit) {
+                const statusSelect = document.getElementById(`bo-status-${item.uniqueId}`);
+                if (statusSelect) statusSelect.addEventListener('change', function () { handleTriageUpdate(item.uniqueId, 'status', this.value, true); });
+            }
+        });
+    }
+
     let isLoggedIn = false;
-    let currentUser = { id: 'guest', name: 'Guest User' };
+    let currentUser = { id: 'guest', name: 'Guest User', email: '', role: 'viewer' };
 
     window.promptLogin = function () {
-        const userName = prompt("Enter your name to log in and enable editing:");
-        if (userName && userName.trim() !== '') {
-            currentUser.id = userName.toLowerCase().replace(/\s/g, '_');
-            currentUser.name = userName.trim();
-            isLoggedIn = true;
-            updateUIForAuth();
+        const modal = document.getElementById('login-modal');
+        document.getElementById('login-name-input').value = '';
+        document.getElementById('login-email-input').value = '';
+        document.getElementById('login-error').classList.add('hidden');
+        document.getElementById('login-success').classList.add('hidden');
+        document.getElementById('login-step-1').classList.remove('hidden');
+        document.getElementById('login-step-2').classList.add('hidden');
+        document.getElementById('login-primary-btn').textContent = 'Send Code';
+        document.getElementById('login-primary-btn').onclick = sendLoginPin;
+        modal.classList.remove('invisible', 'opacity-0');
+        modal.classList.add('visible', 'opacity-100');
+    };
+
+    window.closeLoginModal = function () {
+        const modal = document.getElementById('login-modal');
+        modal.classList.remove('visible', 'opacity-100');
+        modal.classList.add('invisible', 'opacity-0');
+    };
+
+    window.goBackToStep1 = function () {
+        document.getElementById('login-step-1').classList.remove('hidden');
+        document.getElementById('login-step-2').classList.add('hidden');
+        document.getElementById('login-error').classList.add('hidden');
+        document.getElementById('login-success').classList.add('hidden');
+        document.getElementById('login-primary-btn').textContent = 'Send Code';
+        document.getElementById('login-primary-btn').onclick = sendLoginPin;
+    };
+
+    window.sendLoginPin = async function () {
+        const nameInput = document.getElementById('login-name-input').value.trim();
+        const emailInput = document.getElementById('login-email-input').value.trim().toLowerCase();
+        const errorEl = document.getElementById('login-error');
+        const successEl = document.getElementById('login-success');
+        const btn = document.getElementById('login-primary-btn');
+
+        errorEl.classList.add('hidden');
+        successEl.classList.add('hidden');
+
+        if (!nameInput || !emailInput) {
+            errorEl.textContent = 'Please enter both your name and email address.';
+            errorEl.classList.remove('hidden');
+            return;
         }
-    }
+
+        // Only send to authorized emails — no point sending a code to strangers
+        const match = AUTHORIZED_USERS.find(u => u.email.toLowerCase() === emailInput);
+        if (!match) {
+            errorEl.textContent = 'That email is not in the authorized list. You will have view-only access.';
+            errorEl.classList.remove('hidden');
+            // After 2 seconds, grant view-only silently
+            setTimeout(() => {
+                currentUser = { id: emailInput, name: nameInput, email: emailInput, role: 'viewer' };
+                isLoggedIn = false;
+                closeLoginModal();
+                updateUIForAuth();
+            }, 2000);
+            return;
+        }
+
+        btn.textContent = 'Sending...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(SHEET_URL, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'sendpin', email: emailInput, name: nameInput })
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                document.getElementById('login-step-1').classList.add('hidden');
+                document.getElementById('login-step-2').classList.remove('hidden');
+                document.getElementById('login-pin-input').value = '';
+                successEl.textContent = 'Code sent! Check your inbox (and spam folder just in case).';
+                successEl.classList.remove('hidden');
+                btn.textContent = 'Verify Code';
+                btn.disabled = false;
+                btn.onclick = verifyLoginPin;
+                setTimeout(() => document.getElementById('login-pin-input').focus(), 100);
+            } else {
+                errorEl.textContent = result.message || 'Failed to send code. Please try again.';
+                errorEl.classList.remove('hidden');
+                btn.textContent = 'Send Code';
+                btn.disabled = false;
+            }
+        } catch (err) {
+            errorEl.textContent = 'Could not reach the server. Make sure your local server is running.';
+            errorEl.classList.remove('hidden');
+            btn.textContent = 'Send Code';
+            btn.disabled = false;
+        }
+    };
+
+    window.verifyLoginPin = async function () {
+        const emailInput = document.getElementById('login-email-input').value.trim().toLowerCase();
+        const nameInput  = document.getElementById('login-name-input').value.trim();
+        const pinInput   = document.getElementById('login-pin-input').value.trim();
+        const errorEl    = document.getElementById('login-error');
+        const btn        = document.getElementById('login-primary-btn');
+
+        errorEl.classList.add('hidden');
+
+        if (!pinInput || pinInput.length !== 6) {
+            errorEl.textContent = 'Please enter the full 6-digit code.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        btn.textContent = 'Verifying...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(SHEET_URL, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'verifypin', email: emailInput, pin: pinInput })
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                const match = AUTHORIZED_USERS.find(u => u.email.toLowerCase() === emailInput);
+                currentUser = { id: emailInput, name: match ? match.name : nameInput, email: emailInput, role: match ? match.role : 'viewer' };
+                isLoggedIn = !!match;
+                closeLoginModal();
+                updateUIForAuth();
+            } else {
+                errorEl.textContent = result.message || 'Incorrect or expired code. Please try again.';
+                errorEl.classList.remove('hidden');
+                btn.textContent = 'Verify Code';
+                btn.disabled = false;
+            }
+        } catch (err) {
+            errorEl.textContent = 'Could not reach the server. Please try again.';
+            errorEl.classList.remove('hidden');
+            btn.textContent = 'Verify Code';
+            btn.disabled = false;
+        }
+    };
 
     function updateUIForAuth() {
         const loginBtn = document.getElementById('login-btn');
-        loginBtn.textContent = isLoggedIn ? `Logged in: ${currentUser.name}` : 'Login for Editing';
-        loginBtn.onclick = isLoggedIn ? null : promptLogin;
-        loginBtn.classList.toggle('bg-indigo-600', !isLoggedIn);
-        loginBtn.classList.toggle('bg-gray-400', isLoggedIn);
-        loginBtn.disabled = isLoggedIn;
+        const manageCsmBtn = document.getElementById('manage-csm-btn');
+
+        if (isLoggedIn) {
+            const roleBadge = currentUser.role === 'admin' ? ' 🛡️' : '';
+            loginBtn.textContent = `Logged in: ${currentUser.name}${roleBadge}`;
+            loginBtn.onclick = null;
+            loginBtn.classList.remove('bg-indigo-600');
+            loginBtn.classList.add('bg-gray-400');
+            loginBtn.disabled = true;
+        } else if (currentUser.role === 'viewer' && currentUser.email) {
+            loginBtn.textContent = `👁️ Viewing as: ${currentUser.name}`;
+            loginBtn.onclick = null;
+            loginBtn.classList.remove('bg-indigo-600');
+            loginBtn.classList.add('bg-gray-300');
+            loginBtn.disabled = true;
+        }
+
+        // Only show Manage CSMs to admins
+        if (manageCsmBtn) {
+            manageCsmBtn.style.display = (isLoggedIn && currentUser.role === 'admin') ? '' : 'none';
+        }
 
         renderTriageList();
+        renderBlackoutList();
     }
 
     const triageState = {
         csm: 'all',
-        status: 'all'
-    };
+        status: 'all',
+        blackoutRisk: 'all',
+        blackoutFollowUpOnly: false,
+        triageFollowUpOnly: false
 
     const tableState = {
         status: 'all'
@@ -785,42 +1225,154 @@ document.addEventListener('DOMContentLoaded', () => {
         triageCsmFilter.value = currentValue;
     }
 
-    window.handleTriageUpdate = (id, field, value) => {
+    window.handleTriageUpdate = async (uniqueId, field, value, isBlackout = false, silent = false) => {
         if (!isLoggedIn) {
-            alert("Please log in to make changes.");
-            return;
+            return; // silently skip if not logged in during auto-updates
         }
 
-        const record = rawResponses.find(d => d.id === id);
-        if (record) {
-            const uniqueId = record.uniqueId;
-            if (field === 'csm') {
-                triageDetails[uniqueId].assignedCsm = value;
-            } else if (field === 'status') {
-                triageDetails[uniqueId].status = value;
+        if (!triageDetails[uniqueId]) {
+            triageDetails[uniqueId] = { assignedCsm: 'Unassigned', status: 'New Response', history: [] };
+        }
+
+        let companyName = "Unknown";
+        
+        if (isBlackout) {
+            const idx = engagementBlackoutCustomers.findIndex(d => d.uniqueId === uniqueId);
+            if (idx !== -1) {
+                companyName = engagementBlackoutCustomers[idx].company;
+                // Pre-emptively update engagementBlackoutCustomers array so it's fresh when re-rendered
+                engagementBlackoutCustomers[idx].assignedCsm = field === 'csm' ? value : triageDetails[uniqueId].assignedCsm;
+                engagementBlackoutCustomers[idx].status = field === 'status' ? value : triageDetails[uniqueId].status;
             }
-
-            triageDetails[uniqueId].history.push({
-                status: triageDetails[uniqueId].status,
-                csm: triageDetails[uniqueId].assignedCsm,
-                timestamp: new Date().toISOString(),
-                user: currentUser.name,
-                change: `${field} updated to ${value}`
-            });
-
-            rawResponses = rawResponses.map(r => r.uniqueId === uniqueId ? { ...r, ...triageDetails[uniqueId] } : r);
-            renderTriageList();
+        } else {
+            const record = rawResponses.find(d => d.uniqueId === uniqueId);
+            if (record) companyName = record.company;
         }
+
+        let note = "";
+        if (field === 'status' && !silent) {
+            note = prompt(`Please enter a note explaining this status update for ${companyName} (Optional):`);
+            if (note === null) return; // cancel update
+        }
+
+        if (field === 'csm') triageDetails[uniqueId].assignedCsm = value;
+        if (field === 'status') triageDetails[uniqueId].status = value;
+
+        triageDetails[uniqueId].history.push({
+            status: triageDetails[uniqueId].status,
+            csm: triageDetails[uniqueId].assignedCsm,
+            timestamp: new Date().toISOString(),
+            user: currentUser.name,
+            change: note ? `${field} updated to ${value}\nNote: ${note}` : `${field} updated to ${value}`
+        });
+
+        if (!isBlackout) {
+            rawResponses = rawResponses.map(r => r.uniqueId === uniqueId ? { ...r, ...triageDetails[uniqueId] } : r);
+        }
+
+        try {
+            await fetch(SHEET_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    uniqueId: uniqueId,
+                    company: companyName,
+                    field: field,
+                    value: value,
+                    user: currentUser.name,
+                    email: currentUser.email,
+                    note: note
+                })
+            });
+            console.log("✅ Triage saved to DB");
+        } catch (e) {
+            console.error("Failed to POST triage update", e);
+        }
+    }
+
+    // --- FOLLOW-UP REMINDER LOGIC ---
+
+    function getFollowUpStatus(item) {
+        const isFollowUpStatus = item.status === 'Outreach Sent - Awaiting Reply';
+        const isNewResponse = item.status === 'New Response';
+        const isSilentAccount = typeof item.daysSinceLastTicket !== 'undefined';
+
+        // Silent accounts (EB Tab) should show "NEW" follow-up alerts if they are high risk 
+        // and haven't had an outreach attempt yet.
+        if (isNewResponse && isSilentAccount) {
+            const daysLastTicket = item.daysSinceLastTicket;
+            if (daysLastTicket === -1 || daysLastTicket > 365) {
+                return { level: 'critical', days: 0, label: 'NEW' };
+            } else if (daysLastTicket >= 180) {
+                return { level: 'warning', days: 0, label: 'NEW' };
+            }
+        }
+
+        if (!isFollowUpStatus) return null;
+
+        const history = item.history || [];
+        const snoozeExpiry = item.snoozeUntil ? new Date(item.snoozeUntil) : null;
+        const now = new Date();
+
+        // 1. Find the latest outreach/touchpoint in history
+        // Includes: Status updates to "Outreach Sent", Logged Calls, or Manual Events
+        let latestTouchpointTs = 0;
+
+        history.forEach(h => {
+            const hTs = new Date(h.timestamp).getTime();
+            const change = h.change ? h.change.toLowerCase() : '';
+            
+            // Check for status update to Outreach Sent
+            if (h.status === 'Outreach Sent - Awaiting Reply') {
+                if (hTs > latestTouchpointTs) latestTouchpointTs = hTs;
+            }
+            // Check for manual logs (Call or Event)
+            if (change.includes('call logged') || change.includes('event logged')) {
+                if (hTs > latestTouchpointTs) latestTouchpointTs = hTs;
+            }
+        });
+
+        if (latestTouchpointTs === 0) return null;
+
+        // 2. Adjust baseline for Snooze Expiry
+        // If they were snoozed and the snooze just expired, we use the snooze expiry as the baseline 
+        // to avoid "Red" alerts the moment they wake up.
+        let baselineTs = latestTouchpointTs;
+        if (snoozeExpiry && snoozeExpiry < now && snoozeExpiry > latestTouchpointTs) {
+            baselineTs = snoozeExpiry.getTime();
+        }
+
+        const daysElapsed = (now - baselineTs) / (24 * 60 * 60 * 1000);
+
+        if (daysElapsed >= 10) return { level: 'critical', days: Math.floor(daysElapsed) };
+        if (daysElapsed >= 4) return { level: 'warning', days: Math.floor(daysElapsed) };
+        
+        return { level: 'normal', days: Math.floor(daysElapsed) };
     }
 
     window.handleDrillDownClick = function (event, elements, chart) {
         if (!elements || elements.length === 0 || !chart) return;
 
-        const clickedElement = elements[0];
         const chartId = chart.canvas.id;
+        const clickedElement = elements[0];
+        let index = clickedElement.index;
+
+        if (chartId === 'engagementChart') {
+            const label = chart.data.labels[index];
+            const riskFilterEl = document.getElementById('blackoutRiskFilter');
+            if (riskFilterEl) riskFilterEl.value = label;
+            triageState.blackoutRisk = label;
+            renderBlackoutList();
+
+            navigateTo('triage');
+            setTimeout(() => {
+                const blackoutTab = document.getElementById('triage-tab-blackout');
+                if (blackoutTab) blackoutTab.click();
+            }, 50);
+            return;
+        }
+
         let filterKey = null;
         let filterValue = null;
-        let index = clickedElement.index;
 
         if (['happinessChart', 'roiChart', 'adoptionChart', 'erpHealthChart'].includes(chartId)) {
             if (typeof index === 'number' && index >= 0) {
@@ -895,6 +1447,21 @@ document.addEventListener('DOMContentLoaded', () => {
         timezoneEl.addEventListener('change', (e) => {
             state.timezone = e.target.value;
             renderDataTable(getFilteredData());
+        });
+    }
+
+
+
+    document.getElementById('blackoutFollowUpOnly').addEventListener('change', (e) => {
+        triageState.blackoutFollowUpOnly = e.target.checked;
+        renderBlackoutList();
+    });
+
+    const triageFollowUpOnlyEl = document.getElementById('triageFollowUpOnly');
+    if (triageFollowUpOnlyEl) {
+        triageFollowUpOnlyEl.addEventListener('change', (e) => {
+            triageState.triageFollowUpOnly = e.target.checked;
+            renderTriageList();
         });
     }
 
@@ -1043,6 +1610,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 onClick: (event, elements, chart) => handleDrillDownClick(event, elements, chart)
             }
         });
+
+        charts.engagement = new Chart(document.getElementById('engagementChart'), {
+            type: 'bar',
+            data: { labels: ['90-180 Days (Warning)', '180-365 Days (Risk)', '365+ Days / Never (Critical)'], datasets: [{ label: 'Silent Accounts', data: [0, 0, 0], backgroundColor: ['#d69e2e', '#dd6b20', '#e53e3e'], borderRadius: 4 }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } },
+                onClick: (event, elements, chart) => handleDrillDownClick(event, elements, chart)
+            }
+        });
     }
 
     function updateCharts(data) {
@@ -1163,6 +1742,17 @@ document.addEventListener('DOMContentLoaded', () => {
         charts.erpHealth.data.datasets[0].data = erpValues;
         charts.erpHealth.data.datasets[0].backgroundColor = erpColors;
         charts.erpHealth.update();
+
+        if (engagementBlackoutCustomers && engagementBlackoutCustomers.length > 0 && charts.engagement) {
+            const counts = [0, 0, 0];
+            engagementBlackoutCustomers.forEach(c => {
+                if (c.group === '90-180 Days (Warning)') counts[0]++;
+                else if (c.group === '180-365 Days (Risk)') counts[1]++;
+                else counts[2]++;
+            });
+            charts.engagement.data.datasets[0].data = counts;
+            charts.engagement.update();
+        }
     }
 
     // Simple sentiment analyzer
@@ -1265,7 +1855,15 @@ document.addEventListener('DOMContentLoaded', () => {
             triageItems = triageItems.filter(d => d.status === triageState.status);
         }
 
+        if (triageState.triageFollowUpOnly) {
+            triageItems = triageItems.filter(item => {
+                const status = getFollowUpStatus(item);
+                return status && (status.level === 'warning' || status.level === 'critical');
+            });
+        }
+
         triageItems.sort((a, b) => a.happiness - b.happiness);
+
 
         if (triageItems.length === 0) {
             const message = triageState.status === 'Archived'
@@ -1281,6 +1879,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const card = document.createElement('div');
             card.className = `triage-card score-${item.happiness} rounded-lg p-4 grid grid-cols-1 md:grid-cols-5 gap-4 items-center transition shadow-sm`;
 
+            let badgeHtml = '';
+
             const csmOptions = CSMs.map(csm => `<option value="${csm}" ${item.assignedCsm === csm ? 'selected' : ''}>${csm}</option>`).join('');
             const allStatusOptionsWithArchive = ALL_STATUS_OPTIONS.map(s => `<option value="${s}" ${item.status === s ? 'selected' : ''}>${s}</option>`).join('');
 
@@ -1289,12 +1889,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const feedbackPreview = (item.feedback_Q3 || 'No feedback provided').substring(0, 50);
 
-            const disabledAttr = isEditingEnabled ? '' : 'disabled';
-            const opacityClass = isEditingEnabled ? '' : 'opacity-60 cursor-not-allowed';
+            const isAdmin = isLoggedIn && currentUser.role === 'admin';
+            const alreadyAssigned = item.assignedCsm && item.assignedCsm !== 'Unassigned';
+            const assignedToMe = isLoggedIn && alreadyAssigned && item.assignedCsm.toLowerCase() === currentUser.name.toLowerCase();
+            // Admin: full access. CSM: can edit own or self-assign unassigned. Viewer: nothing.
+            const canEdit = isLoggedIn && (isAdmin || assignedToMe || (!alreadyAssigned && currentUser.role === 'csm'));
+            const canAssign = isLoggedIn && (isAdmin || (!alreadyAssigned && currentUser.role === 'csm'));
+            const disabledEdit = canEdit ? '' : 'disabled';
+            const opacityEdit = canEdit ? '' : 'opacity-60 cursor-not-allowed';
+            const disabledAssign = canAssign ? '' : 'disabled';
+            const opacityAssign = canAssign ? '' : 'opacity-60 cursor-not-allowed';
 
             card.innerHTML = `
         <div class="md:col-span-2">
-            <p class="font-bold text-lg text-gray-800">${item.company}</p>
+            <p class="font-bold text-lg text-gray-800 flex items-center">${item.company}${badgeHtml}</p>
             <p class="text-sm text-gray-500">${item.email}</p>
             <p class="text-xs text-gray-500 mt-1">${lastUpdateText}</p>
             <p class="text-sm text-gray-600 mt-2 italic">"${feedbackPreview}..."</p>
@@ -1307,15 +1915,15 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div class="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-                <label for="csm-${item.id}" class="text-xs font-medium text-gray-500">Assign CSM</label>
-                <select ${disabledAttr} id="csm-${item.id}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 text-sm ${opacityClass}">
+                <label for="csm-${item.uniqueId}" class="text-xs font-medium text-gray-500">Assign CSM</label>
+                <select ${disabledAssign} id="csm-${item.uniqueId}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 text-sm ${opacityAssign}">
                     <option value="Unassigned">Unassigned</option>
                     ${csmOptions}
                 </select>
             </div>
             <div>
-                <label for="status-${item.id}" class="text-xs font-medium text-gray-500">Set Status</label>
-                <select ${disabledAttr} id="status-${item.id}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 text-sm ${opacityClass}">
+                <label for="status-${item.uniqueId}" class="text-xs font-medium text-gray-500">Set Status</label>
+                <select ${disabledEdit} id="status-${item.uniqueId}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 text-sm ${opacityEdit}">
                     ${allStatusOptionsWithArchive}
                 </select>
             </div>
@@ -1323,19 +1931,26 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
             listEl.appendChild(card);
 
-            if (isEditingEnabled) {
-                const csmSelect = document.getElementById(`csm-${item.id}`);
-                const statusSelect = document.getElementById(`status-${item.id}`);
-
+            if (canAssign) {
+                const csmSelect = document.getElementById(`csm-${item.uniqueId}`);
                 if (csmSelect) {
                     csmSelect.addEventListener('change', function () {
-                        handleTriageUpdate(item.id, 'csm', this.value);
+                        // CSM role: only allow selecting themselves
+                        if (!isAdmin && this.value !== 'Unassigned' && this.value.toLowerCase() !== currentUser.name.toLowerCase()) {
+                            alert('You can only assign customers to yourself.');
+                            this.value = item.assignedCsm || 'Unassigned';
+                            return;
+                        }
+                        handleTriageUpdate(item.uniqueId, 'csm', this.value, false);
                     });
                 }
+            }
 
+            if (canEdit) {
+                const statusSelect = document.getElementById(`status-${item.uniqueId}`);
                 if (statusSelect) {
                     statusSelect.addEventListener('change', function () {
-                        handleTriageUpdate(item.id, 'status', this.value);
+                        handleTriageUpdate(item.uniqueId, 'status', this.value, false);
                     });
                 }
             }
@@ -1450,6 +2065,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const blackoutRiskFilter = document.getElementById('blackoutRiskFilter');
+    if (blackoutRiskFilter) {
+        blackoutRiskFilter.addEventListener('change', function(e) {
+            triageState.blackoutRisk = e.target.value;
+            renderBlackoutList();
+        });
+    }
+
+    const triageTabCritical = document.getElementById('triage-tab-critical');
+    const triageTabBlackout = document.getElementById('triage-tab-blackout');
+    
+    if (triageTabCritical && triageTabBlackout) {
+        triageTabCritical.addEventListener('click', () => {
+            document.getElementById('triage-critical-section').classList.remove('hidden');
+            document.getElementById('triage-blackout-section').classList.add('hidden');
+            triageTabCritical.className = "py-2 px-4 border-b-2 border-indigo-600 font-semibold text-indigo-600";
+            triageTabBlackout.className = "py-2 px-4 border-b-2 border-transparent font-medium text-gray-500 hover:text-gray-700 flex items-center";
+        });
+    
+        triageTabBlackout.addEventListener('click', () => {
+            document.getElementById('triage-critical-section').classList.add('hidden');
+            document.getElementById('triage-blackout-section').classList.remove('hidden');
+            triageTabCritical.className = "py-2 px-4 border-b-2 border-transparent font-medium text-gray-500 hover:text-gray-700";
+            triageTabBlackout.className = "py-2 px-4 border-b-2 border-indigo-600 font-semibold text-indigo-600 flex items-center";
+        });
+    }
+
     function init() {
         fetchData();
         createCharts();
@@ -1459,3 +2101,301 @@ document.addEventListener('DOMContentLoaded', () => {
 
     init();
 });
+
+
+// --- OUTREACH PIPELINE MODAL HELPERS ---
+
+let currentOutreachContacts = [];
+let currentOutreachIndex = 0;
+let currentOutreachUniqueId = '';
+let currentOutreachCompany = '';
+
+function openSnoozeModal(uniqueId) {
+    if (typeof isLoggedIn !== 'undefined' && !isLoggedIn) {
+        alert("You must be logged in to manage snoozes.");
+        return;
+    }
+    document.getElementById('snooze-unique-id').value = uniqueId;
+    document.getElementById('snooze-date').value = '';
+    document.getElementById('snooze-note').value = '';
+    const modal = document.getElementById('snooze-modal');
+    modal.classList.remove('invisible', 'opacity-0');
+}
+
+function closeSnoozeModal() {
+    const modal = document.getElementById('snooze-modal');
+    modal.classList.add('invisible', 'opacity-0');
+}
+
+function saveSnooze() {
+    const uniqueId = document.getElementById('snooze-unique-id').value;
+    const date = document.getElementById('snooze-date').value;
+    const note = document.getElementById('snooze-note').value;
+    if (!date || !note.trim()) {
+        alert("Please provide both a date and a reason for snoozing.");
+        return;
+    }
+    const historyText = `Snoozed until ${date}: ${note.trim()}`;
+    handleTriageUpdate(uniqueId, 'history', historyText, true);
+    closeSnoozeModal();
+    alert("Account snoozed successfully! It will disappear on the next refresh.");
+    setTimeout(() => location.reload(), 1500);
+}
+
+function openOutreachModal(uniqueId, companyName) {
+    if (typeof isLoggedIn !== 'undefined' && !isLoggedIn) {
+        alert("You must be logged in to perform Outreach.");
+        return;
+    }
+    currentOutreachUniqueId = uniqueId;
+    currentOutreachCompany = companyName;
+    document.getElementById('outreach-unique-id').value = uniqueId;
+    document.getElementById('outreach-real-company-name').value = companyName;
+    document.getElementById('outreach-company-name').textContent = `Outreach: ${companyName}`;
+    document.getElementById('outreach-cadence-status').textContent = 'Fetching Contacts from Freshdesk...';
+    document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-indigo-600 mt-1';
+    
+    // Add Last Outreach Context
+    const status = getFollowUpStatus(triageDetails[uniqueId] || {status: 'New Response', history: []});
+    const lastOutreachSection = document.getElementById('outreach-cadence-status');
+    if (status && status.days !== Infinity) {
+        lastOutreachSection.innerHTML += ` <span class="text-xs text-gray-400 font-normal">| Last interaction: ${status.days}d ago</span>`;
+    }
+    
+    document.getElementById('outreach-contact-card').classList.add('hidden');
+    document.getElementById('outreach-actions').classList.add('hidden');
+    document.getElementById('outreach-no-contacts').classList.add('hidden');
+    document.getElementById('fail-contact-section').classList.add('hidden');
+    document.getElementById('email-composer').classList.add('hidden');
+    document.getElementById('call-logger').classList.add('hidden');
+
+    const modal = document.getElementById('outreach-modal');
+    modal.classList.remove('invisible', 'opacity-0');
+
+    fetch(`${SHEET_URL}?type=contacts&companyName=${encodeURIComponent(companyName)}`)
+    .then(res => {
+        console.log('🔍 Contacts fetch status:', res.status, res.url);
+        return res.text();  // Get raw text first to see what GAS is actually returning
+    })
+    .then(rawText => {
+        console.log('📄 Raw response (first 200 chars):', rawText.substring(0, 200));
+        let data;
+        try { data = JSON.parse(rawText); } catch(e) {
+            console.error('❌ Not valid JSON. GAS may still be running old code. Raw:', rawText.substring(0, 300));
+            renderNoContacts();
+            return;
+        }
+        if (data.status === 'success' && data.data && data.data.contacts) {
+             console.log('✅ Contacts loaded. GS Version:', data.gs_version || 'unknown');
+             currentOutreachContacts = data.data.contacts;
+             currentOutreachIndex = 0;
+             document.getElementById('outreach-company-id').value = data.data.companyId || '';
+             renderCurrentContact();
+        } else {
+             console.error('Contacts fetch error:', data.message);
+             renderNoContacts();
+        }
+    })
+    .catch(err => {
+         console.error(err);
+         renderNoContacts();
+    });
+}
+
+function closeOutreachModal() {
+    const modal = document.getElementById('outreach-modal');
+    modal.classList.add('invisible', 'opacity-0');
+}
+
+function renderCurrentContact() {
+    if (currentOutreachContacts.length === 0 || currentOutreachIndex >= currentOutreachContacts.length) {
+        renderNoContacts();
+        return;
+    }
+    
+    const c = currentOutreachContacts[currentOutreachIndex];
+    document.getElementById('outreach-cadence-status').textContent = `Attempt ${currentOutreachIndex + 1} of ${currentOutreachContacts.length}: Freshdesk Contact Loaded.`;
+    document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-green-600 mt-1';
+    
+    document.getElementById('outreach-target-name').value = c.name;
+    document.getElementById('outreach-target-email').value = c.email;
+    
+    document.getElementById('outreach-c-name').textContent = c.name;
+    document.getElementById('outreach-c-title').textContent = c.job_title || 'No Title Listed';
+    document.getElementById('outreach-c-email').textContent = c.email;
+    
+    // Personalize Greeting
+    let greeting = "Hi,";
+    const eMatch = c.email.toLowerCase();
+    const isDistribution = (eMatch.indexOf('admin@') === 0 || eMatch.indexOf('info@') === 0 || eMatch.indexOf('it@') === 0 || eMatch.indexOf('support@') === 0 || eMatch.indexOf('team@') === 0 || !c.name || c.name.trim() === "");
+    
+    if (isDistribution) {
+        const realCoName = document.getElementById('outreach-real-company-name').value || "Team";
+        greeting = `Hi ${realCoName} Team,`;
+    } else {
+        const firstName = c.name.split(' ')[0];
+        greeting = `Hi ${firstName},`;
+    }
+    
+    const bodyText = `${greeting}\n\nI noticed we haven't touched base in a while. Since we've seen some shifting workflows recently, I wanted to reach out to ensure everything is running smoothly with CLEAN_Address.\n\nLet me know if you need anything!\n\nBest,`;
+    document.getElementById('email-body').value = bodyText;
+
+    document.getElementById('outreach-contact-card').classList.remove('hidden');
+    document.getElementById('outreach-actions').classList.remove('hidden');
+    document.getElementById('fail-contact-section').classList.remove('hidden');
+    document.getElementById('outreach-no-contacts').classList.add('hidden');
+    document.getElementById('email-composer').classList.add('hidden');
+    document.getElementById('call-logger').classList.add('hidden');
+}
+
+function renderNoContacts() {
+    document.getElementById('outreach-cadence-status').textContent = 'All Valid Contacts Exhausted.';
+    document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-red-600 mt-1';
+    document.getElementById('outreach-contact-card').classList.add('hidden');
+    document.getElementById('outreach-actions').classList.add('hidden');
+    document.getElementById('fail-contact-section').classList.add('hidden');
+    document.getElementById('outreach-no-contacts').classList.remove('hidden');
+    handleTriageUpdate(currentOutreachUniqueId, 'status', 'Requires CS Review - DNC/Exhausted', true, true);
+}
+
+function failCurrentContact() {
+    const c = currentOutreachContacts[currentOutreachIndex];
+    handleTriageUpdate(currentOutreachUniqueId, 'history', `Cadence Failed for ${c.name} (${c.email}). Moving to next contact.`, true);
+    currentOutreachIndex++;
+    renderCurrentContact();
+}
+
+function executeEmailSend() {
+    const email = document.getElementById('outreach-target-email').value;
+    const name = document.getElementById('outreach-target-name').value;
+    const subject = document.getElementById('email-subject').value;
+    const body = document.getElementById('email-body').value;
+    const company = document.getElementById('outreach-real-company-name').value;
+    
+    const btn = document.getElementById('send-outreach-btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    
+    fetch(SHEET_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+             document.getElementById('email-status-msg').textContent = 'Email sent successfully via Code.gs!';
+             document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-green-600';
+             handleTriageUpdate(currentOutreachUniqueId, 'history', `Emailed ${name} at ${email}. Wait 3-4 days before calling.`, true, true);
+             handleTriageUpdate(currentOutreachUniqueId, 'status', 'Outreach Sent - Awaiting Reply', true, true);
+             setTimeout(() => closeOutreachModal(), 2000);
+        } else {
+             document.getElementById('email-status-msg').textContent = 'Error: ' + data.message;
+             document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-red-600';
+        }
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Send Now (via Backend)';
+    });
+}
+
+function generateMailto() {
+    const email = document.getElementById('outreach-target-email').value;
+    const name = document.getElementById('outreach-target-name').value;
+    const subject = encodeURIComponent(document.getElementById('email-subject').value);
+    const body = encodeURIComponent(document.getElementById('email-body').value);
+    
+    handleTriageUpdate(currentOutreachUniqueId, 'history', `Manually drafted email for ${name} at ${email}. Wait 3-4 days before calling.`, true, true);
+    handleTriageUpdate(currentOutreachUniqueId, 'status', 'Outreach Sent - Awaiting Reply', true, true);
+    window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
+}
+
+function executeCallLog() {
+    const name = document.getElementById('outreach-target-name').value;
+    const outcome = document.getElementById('call-outcome').value;
+    const notes = document.getElementById('call-notes').value;
+    
+    handleTriageUpdate(currentOutreachUniqueId, 'history', `Phone Attempt (${outcome}) for ${name}. Notes: ${notes}`, true, true);
+    alert('Call attempt logged successfully to Triage History!');
+    closeOutreachModal();
+}
+
+window.executeEventLog = async function() {
+    const name = document.getElementById('outreach-target-name').value;
+    const type = document.getElementById('event-type').value;
+    const notes = document.getElementById('event-notes').value;
+    
+    // Log the touchpoint with the custom [EVENT LOGGED] tag so history parser can find it for follow-up reminders
+    await handleTriageUpdate(currentOutreachUniqueId, 'history', `[EVENT LOGGED] ${type} interaction with ${name}. Notes: ${notes}`, true, true);
+    
+    alert('Manual event logged successfully and outreach clock reset!');
+    closeOutreachModal();
+}
+
+function openAddContactModal() {
+    closeOutreachModal();
+    document.getElementById('add-c-companyId').value = document.getElementById('outreach-company-id').value;
+    document.getElementById('add-c-uniqueId').value = document.getElementById('outreach-unique-id').value;
+    document.getElementById('add-c-name').value = '';
+    document.getElementById('add-c-email').value = '';
+    document.getElementById('add-c-title').value = '';
+    document.getElementById('add-c-status').textContent = '';
+    
+    const modal = document.getElementById('add-contact-modal');
+    modal.classList.remove('invisible', 'opacity-0');
+}
+
+function closeAddContactModal() {
+    const modal = document.getElementById('add-contact-modal');
+    modal.classList.add('invisible', 'opacity-0');
+}
+
+function saveNewContact() {
+    const name = document.getElementById('add-c-name').value;
+    const email = document.getElementById('add-c-email').value;
+    const title = document.getElementById('add-c-title').value;
+    const companyId = document.getElementById('add-c-companyId').value;
+    const uniqueId = document.getElementById('add-c-uniqueId').value;
+    
+    if (!name || !email) {
+        document.getElementById('add-c-status').textContent = 'Name and Email are required.';
+        document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-red-600';
+        return;
+    }
+    if (!companyId) {
+        document.getElementById('add-c-status').textContent = 'Company ID missing from Freshdesk search. Ensure company was found.';
+        document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-red-600';
+        return;
+    }
+    
+    const btn = document.getElementById('save-new-contact-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    
+    fetch(SHEET_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'addcontact', name, email, title, companyId })
+    })
+    .then(res => res.text())
+    .then(rawText => {
+        console.log('📄 addcontact Raw Response:', rawText);
+        let data = JSON.parse(rawText);
+        if (data.status === 'success') {
+             document.getElementById('add-c-status').textContent = 'Successfully saved to Freshdesk! Restarting Cadence...';
+             document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-green-600';
+             handleTriageUpdate(uniqueId, 'history', `Harvested new Contact from Auto-Reply: ${name} (${email}).`, true);
+             setTimeout(() => {
+                 closeAddContactModal();
+                 openOutreachModal(uniqueId, currentOutreachCompany);
+             }, 1500);
+        } else {
+             const ver = data.gs_version ? ` (Backend v${data.gs_version})` : ' (Backend v1.2 or older)';
+             document.getElementById('add-c-status').textContent = 'Error: ' + data.message + ver;
+             document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-red-600';
+        }
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Save to Freshdesk';
+    });
+}
