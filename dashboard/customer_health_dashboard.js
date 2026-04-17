@@ -758,6 +758,81 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBlackoutList();
     }
 
+    // --- FOLLOW-UP REMINDER LOGIC ---
+    // Returns null (no badge needed) or { level: 'warning'|'critical', days, label }
+    // Levels:
+    //   'warning'  = 4+ days since last outreach touch  → 🟠 (2nd touch due)
+    //   'critical' = 10+ days since last outreach touch → 🔴 (3rd touch / escalate)
+    //   'new'      = never touched at all (show NEW badge as critical)
+    function getFollowUpStatus(item) {
+        // Pull triage detail for this item so we can read outreach history
+        const uniqueId = item.uniqueId;
+        const detail = (typeof triageDetails !== 'undefined' && triageDetails[uniqueId])
+            ? triageDetails[uniqueId]
+            : item; // fallback to item itself if passed directly
+
+        const history = Array.isArray(detail.history) ? detail.history : [];
+        const currentStatus = detail.status || item.status || 'New Response';
+
+        // Keywords that indicate an outreach touch happened
+        const TOUCH_KEYWORDS = [
+            'emailed', 'phone attempt', 'cadence', 'outreach sent',
+            '[event logged]', 'manually drafted email'
+        ];
+
+        // Find the most recent history entry that represents an outreach touch
+        let lastTouchDate = null;
+        for (let i = history.length - 1; i >= 0; i--) {
+            const entry = history[i];
+            const changeText = (entry.change || '').toLowerCase();
+            const hasTouchKeyword = TOUCH_KEYWORDS.some(kw => changeText.includes(kw));
+            if (hasTouchKeyword && entry.timestamp) {
+                const d = new Date(entry.timestamp);
+                if (!isNaN(d.getTime())) {
+                    lastTouchDate = d;
+                    break;
+                }
+            }
+        }
+
+        const now = new Date();
+
+        // If the account has been contacted before, compute days since last touch
+        if (lastTouchDate) {
+            const daysSince = Math.floor((now - lastTouchDate) / (1000 * 60 * 60 * 24));
+
+            // Only show reminders if still awaiting a reply (not resolved/archived)
+            const isAwaitingReply = currentStatus === 'Outreach Sent - Awaiting Reply'
+                || currentStatus === 'New Response'
+                || currentStatus === 'Requires CS Review - DNC/Exhausted';
+
+            if (!isAwaitingReply) return null;
+
+            if (daysSince >= 10) {
+                return { level: 'critical', days: daysSince, label: `🔴 10-Day Follow-Up! (${daysSince}d)` };
+            } else if (daysSince >= 4) {
+                return { level: 'warning', days: daysSince, label: `🟠 4-Day Follow-Up (${daysSince}d)` };
+            }
+            return null; // touched recently, no reminder needed
+        }
+
+        // Never touched — show a NEW badge so CSMs know it needs a first contact
+        if (currentStatus === 'New Response') {
+            const isSilent = typeof item.daysSinceLastTicket !== 'undefined';
+            if (isSilent) {
+                const days = item.daysSinceLastTicket;
+                if (days === Infinity || days > 365) {
+                    return { level: 'critical', days: 0, label: '🔴 NEW – 1st Touch Needed' };
+                } else if (days > 180) {
+                    return { level: 'warning', days: 0, label: '🟠 NEW – 1st Touch Needed' };
+                }
+            }
+        }
+
+        return null;
+    }
+    // --- END FOLLOW-UP REMINDER LOGIC ---
+
     function renderBlackoutList() {
         const listEl = document.getElementById('blackout-list');
         if (!listEl) return;
@@ -824,7 +899,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="text-sm font-semibold px-3 py-1 bg-gray-100 text-gray-600 rounded-full">Last Ticket: ${displayDays}</span>
                 </div>
                 <div class="flex justify-start md:justify-end gap-2">
-                    <button onclick="openOutreachModal('${item.uniqueId}', '${item.company.replace(/'/g, "\\'")}')" class="inline-flex items-center px-3 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition text-sm shadow-sm cursor-pointer whitespace-nowrap">
+                    <button class="outreach-btn inline-flex items-center px-3 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition text-sm shadow-sm cursor-pointer whitespace-nowrap"
+                        data-uid="${item.uniqueId}" data-company="${item.company.replace(/"/g, '&quot;')}">
                         <svg class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                         </svg>
@@ -868,6 +944,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const statusSelect = document.getElementById(`bo-status-${item.uniqueId}`);
                 if (statusSelect) statusSelect.addEventListener('change', function () { handleTriageUpdate(item.uniqueId, 'status', this.value, true); });
             }
+        });
+
+        // Delegated listener for Outreach buttons (data-attribute approach avoids escaping issues)
+        listEl.querySelectorAll('.outreach-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const uid = this.getAttribute('data-uid');
+                const company = this.getAttribute('data-company');
+                openOutreachModal(uid, company);
+            });
         });
     }
 
@@ -1045,8 +1130,8 @@ document.addEventListener('DOMContentLoaded', () => {
         csm: 'all',
         status: 'all',
         blackoutRisk: 'all',
-        blackoutFollowUpOnly: false,
-        triageFollowUpOnly: false
+        blackoutFollowUpOnly: false
+    };
 
     const tableState = {
         status: 'all'
@@ -1457,14 +1542,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBlackoutList();
     });
 
-    const triageFollowUpOnlyEl = document.getElementById('triageFollowUpOnly');
-    if (triageFollowUpOnlyEl) {
-        triageFollowUpOnlyEl.addEventListener('change', (e) => {
-            triageState.triageFollowUpOnly = e.target.checked;
-            renderTriageList();
-        });
-    }
-
     function getFilteredData() {
         let filtered = [...rawResponses];
 
@@ -1853,13 +1930,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (triageState.status !== 'all') {
             triageItems = triageItems.filter(d => d.status === triageState.status);
-        }
-
-        if (triageState.triageFollowUpOnly) {
-            triageItems = triageItems.filter(item => {
-                const status = getFollowUpStatus(item);
-                return status && (status.level === 'warning' || status.level === 'critical');
-            });
         }
 
         triageItems.sort((a, b) => a.happiness - b.happiness);
