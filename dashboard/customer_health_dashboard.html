@@ -280,7 +280,7 @@
                                 CSM</label>
                             <select id="triageCsmFilter"
                                 class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mt-1">
-                                <option value="all">All CSMs</option>
+                                <option id="triageCsmAllOption" value="all">All CSMs</option>
                             </select>
                         </div>
                         <div class="w-full">
@@ -296,10 +296,6 @@
                                 <option value="Outreach Sent - Awaiting Reply">Outreach Sent - Awaiting Reply</option>
                                 <option value="Archived">Archived (Hidden by default)</option>
                             </select>
-                            <div class="flex items-center gap-2 mt-3">
-                                <input type="checkbox" id="triageFollowUpOnly" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                                <label for="triageFollowUpOnly" class="text-xs font-bold text-indigo-600 uppercase">Follow-up Only</label>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -327,6 +323,12 @@
                                 <div class="flex items-center gap-2 mt-3">
                                     <input type="checkbox" id="blackoutFollowUpOnly" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                                     <label for="blackoutFollowUpOnly" class="text-xs font-bold text-orange-600 uppercase">Follow-up Only</label>
+                                </div>
+                                <div class="mt-3">
+                                    <label for="blackoutCsmFilter" class="text-xs font-medium text-orange-800 uppercase">Assigned CSM</label>
+                                    <select id="blackoutCsmFilter" class="w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm mt-1">
+                                        <option id="blackoutCsmAllOption" value="all">All CSMs</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>

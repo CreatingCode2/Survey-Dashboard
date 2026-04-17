@@ -843,6 +843,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (triageState.blackoutRisk && triageState.blackoutRisk !== 'all') {
             severeItems = severeItems.filter(c => c.group === triageState.blackoutRisk);
         }
+
+        // CSM scoping for Blackout tab
+        if (triageState.blackoutCsm && triageState.blackoutCsm !== 'all') {
+            severeItems = severeItems.filter(c => c.assignedCsm === triageState.blackoutCsm);
+        }
         
         const isEditingEnabled = isLoggedIn;
 
@@ -1122,6 +1127,28 @@ document.addEventListener('DOMContentLoaded', () => {
             manageCsmBtn.style.display = (isLoggedIn && currentUser.role === 'admin') ? '' : 'none';
         }
 
+        // --- CSM SCOPING: auto-filter both tabs to the logged-in CSM's accounts ---
+        const isAdmin = isLoggedIn && currentUser.role === 'admin';
+        const scopedCsm = (isLoggedIn && !isAdmin) ? currentUser.name : 'all';
+
+        // Critical tab filter
+        const critAllOpt = document.getElementById('triageCsmAllOption');
+        const critFilter = document.getElementById('triageCsmFilter');
+        if (critAllOpt) critAllOpt.style.display = isAdmin ? '' : 'none';
+        if (critFilter) {
+            critFilter.value = scopedCsm;
+            triageState.csm = scopedCsm;
+        }
+
+        // Blackout tab filter
+        const boAllOpt = document.getElementById('blackoutCsmAllOption');
+        const boFilter = document.getElementById('blackoutCsmFilter');
+        if (boAllOpt) boAllOpt.style.display = isAdmin ? '' : 'none';
+        if (boFilter) {
+            boFilter.value = scopedCsm;
+            triageState.blackoutCsm = scopedCsm;
+        }
+
         renderTriageList();
         renderBlackoutList();
     }
@@ -1130,7 +1157,8 @@ document.addEventListener('DOMContentLoaded', () => {
         csm: 'all',
         status: 'all',
         blackoutRisk: 'all',
-        blackoutFollowUpOnly: false
+        blackoutFollowUpOnly: false,
+        blackoutCsm: 'all'
     };
 
     const tableState = {
@@ -2139,6 +2167,23 @@ document.addEventListener('DOMContentLoaded', () => {
     if (blackoutRiskFilter) {
         blackoutRiskFilter.addEventListener('change', function(e) {
             triageState.blackoutRisk = e.target.value;
+            renderBlackoutList();
+        });
+    }
+
+    const blackoutCsmFilter = document.getElementById('blackoutCsmFilter');
+    if (blackoutCsmFilter) {
+        // Populate with CSM names
+        CSMs.forEach(csm => {
+            if (!blackoutCsmFilter.querySelector(`option[value="${csm}"]`)) {
+                const opt = document.createElement('option');
+                opt.value = csm;
+                opt.textContent = csm;
+                blackoutCsmFilter.appendChild(opt);
+            }
+        });
+        blackoutCsmFilter.addEventListener('change', function(e) {
+            triageState.blackoutCsm = e.target.value;
             renderBlackoutList();
         });
     }
