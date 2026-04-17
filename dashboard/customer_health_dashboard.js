@@ -831,6 +831,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return null;
     }
+    window.getFollowUpStatus = getFollowUpStatus; // expose to global openOutreachModal
     // --- END FOLLOW-UP REMINDER LOGIC ---
 
     function renderBlackoutList() {
@@ -2215,302 +2216,278 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     init();
-});
 
+    // --- OUTREACH PIPELINE STATE & HELPERS (Moved inside DOMContentLoaded for scope) ---
+    let currentOutreachContacts = [];
+    let currentOutreachIndex = 0;
+    let currentOutreachUniqueId = '';
+    let currentOutreachCompany = '';
 
-// --- OUTREACH PIPELINE MODAL HELPERS ---
-
-let currentOutreachContacts = [];
-let currentOutreachIndex = 0;
-let currentOutreachUniqueId = '';
-let currentOutreachCompany = '';
-
-function openSnoozeModal(uniqueId) {
-    if (typeof isLoggedIn !== 'undefined' && !isLoggedIn) {
-        alert("You must be logged in to manage snoozes.");
-        return;
-    }
-    document.getElementById('snooze-unique-id').value = uniqueId;
-    document.getElementById('snooze-date').value = '';
-    document.getElementById('snooze-note').value = '';
-    const modal = document.getElementById('snooze-modal');
-    modal.classList.remove('invisible', 'opacity-0');
-}
-
-function closeSnoozeModal() {
-    const modal = document.getElementById('snooze-modal');
-    modal.classList.add('invisible', 'opacity-0');
-}
-
-function saveSnooze() {
-    const uniqueId = document.getElementById('snooze-unique-id').value;
-    const date = document.getElementById('snooze-date').value;
-    const note = document.getElementById('snooze-note').value;
-    if (!date || !note.trim()) {
-        alert("Please provide both a date and a reason for snoozing.");
-        return;
-    }
-    const historyText = `Snoozed until ${date}: ${note.trim()}`;
-    handleTriageUpdate(uniqueId, 'history', historyText, true);
-    closeSnoozeModal();
-    alert("Account snoozed successfully! It will disappear on the next refresh.");
-    setTimeout(() => location.reload(), 1500);
-}
-
-function openOutreachModal(uniqueId, companyName) {
-    if (typeof isLoggedIn !== 'undefined' && !isLoggedIn) {
-        alert("You must be logged in to perform Outreach.");
-        return;
-    }
-    currentOutreachUniqueId = uniqueId;
-    currentOutreachCompany = companyName;
-    document.getElementById('outreach-unique-id').value = uniqueId;
-    document.getElementById('outreach-real-company-name').value = companyName;
-    document.getElementById('outreach-company-name').textContent = `Outreach: ${companyName}`;
-    document.getElementById('outreach-cadence-status').textContent = 'Fetching Contacts from Freshdesk...';
-    document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-indigo-600 mt-1';
-    
-    // Add Last Outreach Context
-    const status = getFollowUpStatus(triageDetails[uniqueId] || {status: 'New Response', history: []});
-    const lastOutreachSection = document.getElementById('outreach-cadence-status');
-    if (status && status.days !== Infinity) {
-        lastOutreachSection.innerHTML += ` <span class="text-xs text-gray-400 font-normal">| Last interaction: ${status.days}d ago</span>`;
-    }
-    
-    document.getElementById('outreach-contact-card').classList.add('hidden');
-    document.getElementById('outreach-actions').classList.add('hidden');
-    document.getElementById('outreach-no-contacts').classList.add('hidden');
-    document.getElementById('fail-contact-section').classList.add('hidden');
-    document.getElementById('email-composer').classList.add('hidden');
-    document.getElementById('call-logger').classList.add('hidden');
-
-    const modal = document.getElementById('outreach-modal');
-    modal.classList.remove('invisible', 'opacity-0');
-
-    fetch(`${SHEET_URL}?type=contacts&companyName=${encodeURIComponent(companyName)}`)
-    .then(res => {
-        console.log('🔍 Contacts fetch status:', res.status, res.url);
-        return res.text();  // Get raw text first to see what GAS is actually returning
-    })
-    .then(rawText => {
-        console.log('📄 Raw response (first 200 chars):', rawText.substring(0, 200));
-        let data;
-        try { data = JSON.parse(rawText); } catch(e) {
-            console.error('❌ Not valid JSON. GAS may still be running old code. Raw:', rawText.substring(0, 300));
-            renderNoContacts();
+    window.openSnoozeModal = function(uniqueId) {
+        if (typeof isLoggedIn !== 'undefined' && !isLoggedIn) {
+            alert("You must be logged in to manage snoozes.");
             return;
         }
-        if (data.status === 'success' && data.data && data.data.contacts) {
-             console.log('✅ Contacts loaded. GS Version:', data.gs_version || 'unknown');
-             currentOutreachContacts = data.data.contacts;
-             currentOutreachIndex = 0;
-             document.getElementById('outreach-company-id').value = data.data.companyId || '';
-             renderCurrentContact();
-        } else {
-             console.error('Contacts fetch error:', data.message);
-             renderNoContacts();
+        document.getElementById('snooze-unique-id').value = uniqueId;
+        document.getElementById('snooze-date').value = '';
+        document.getElementById('snooze-note').value = '';
+        const modal = document.getElementById('snooze-modal');
+        modal.classList.remove('invisible', 'opacity-0');
+    }
+
+    window.closeSnoozeModal = function() {
+        const modal = document.getElementById('snooze-modal');
+        modal.classList.add('invisible', 'opacity-0');
+    }
+
+    window.saveSnooze = function() {
+        const uniqueId = document.getElementById('snooze-unique-id').value;
+        const date = document.getElementById('snooze-date').value;
+        const note = document.getElementById('snooze-note').value;
+        if (!date || !note.trim()) {
+            alert("Please provide both a date and a reason for snoozing.");
+            return;
         }
-    })
-    .catch(err => {
-         console.error(err);
-         renderNoContacts();
-    });
-}
-
-function closeOutreachModal() {
-    const modal = document.getElementById('outreach-modal');
-    modal.classList.add('invisible', 'opacity-0');
-}
-
-function renderCurrentContact() {
-    if (currentOutreachContacts.length === 0 || currentOutreachIndex >= currentOutreachContacts.length) {
-        renderNoContacts();
-        return;
+        const historyText = `Snoozed until ${date}: ${note.trim()}`;
+        handleTriageUpdate(uniqueId, 'history', historyText, true);
+        closeSnoozeModal();
+        alert("Account snoozed successfully! It will disappear on the next refresh.");
+        setTimeout(() => location.reload(), 1500);
     }
-    
-    const c = currentOutreachContacts[currentOutreachIndex];
-    document.getElementById('outreach-cadence-status').textContent = `Attempt ${currentOutreachIndex + 1} of ${currentOutreachContacts.length}: Freshdesk Contact Loaded.`;
-    document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-green-600 mt-1';
-    
-    document.getElementById('outreach-target-name').value = c.name;
-    document.getElementById('outreach-target-email').value = c.email;
-    
-    document.getElementById('outreach-c-name').textContent = c.name;
-    document.getElementById('outreach-c-title').textContent = c.job_title || 'No Title Listed';
-    document.getElementById('outreach-c-email').textContent = c.email;
-    
-    // Personalize Greeting
-    let greeting = "Hi,";
-    const eMatch = c.email.toLowerCase();
-    const isDistribution = (eMatch.indexOf('admin@') === 0 || eMatch.indexOf('info@') === 0 || eMatch.indexOf('it@') === 0 || eMatch.indexOf('support@') === 0 || eMatch.indexOf('team@') === 0 || !c.name || c.name.trim() === "");
-    
-    if (isDistribution) {
-        const realCoName = document.getElementById('outreach-real-company-name').value || "Team";
-        greeting = `Hi ${realCoName} Team,`;
-    } else {
-        const firstName = c.name.split(' ')[0];
-        greeting = `Hi ${firstName},`;
-    }
-    
-    const bodyText = `${greeting}\n\nI noticed we haven't touched base in a while. Since we've seen some shifting workflows recently, I wanted to reach out to ensure everything is running smoothly with CLEAN_Address.\n\nLet me know if you need anything!\n\nBest,`;
-    document.getElementById('email-body').value = bodyText;
 
-    document.getElementById('outreach-contact-card').classList.remove('hidden');
-    document.getElementById('outreach-actions').classList.remove('hidden');
-    document.getElementById('fail-contact-section').classList.remove('hidden');
-    document.getElementById('outreach-no-contacts').classList.add('hidden');
-    document.getElementById('email-composer').classList.add('hidden');
-    document.getElementById('call-logger').classList.add('hidden');
-}
-
-function renderNoContacts() {
-    document.getElementById('outreach-cadence-status').textContent = 'All Valid Contacts Exhausted.';
-    document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-red-600 mt-1';
-    document.getElementById('outreach-contact-card').classList.add('hidden');
-    document.getElementById('outreach-actions').classList.add('hidden');
-    document.getElementById('fail-contact-section').classList.add('hidden');
-    document.getElementById('outreach-no-contacts').classList.remove('hidden');
-    handleTriageUpdate(currentOutreachUniqueId, 'status', 'Requires CS Review - DNC/Exhausted', true, true);
-}
-
-function failCurrentContact() {
-    const c = currentOutreachContacts[currentOutreachIndex];
-    handleTriageUpdate(currentOutreachUniqueId, 'history', `Cadence Failed for ${c.name} (${c.email}). Moving to next contact.`, true);
-    currentOutreachIndex++;
-    renderCurrentContact();
-}
-
-function executeEmailSend() {
-    const email = document.getElementById('outreach-target-email').value;
-    const name = document.getElementById('outreach-target-name').value;
-    const subject = document.getElementById('email-subject').value;
-    const body = document.getElementById('email-body').value;
-    const company = document.getElementById('outreach-real-company-name').value;
-    
-    const btn = document.getElementById('send-outreach-btn');
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
-    
-    fetch(SHEET_URL, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company })
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.status === 'success') {
-             document.getElementById('email-status-msg').textContent = 'Email sent successfully via Code.gs!';
-             document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-green-600';
-             handleTriageUpdate(currentOutreachUniqueId, 'history', `Emailed ${name} at ${email}. Wait 3-4 days before calling.`, true, true);
-             handleTriageUpdate(currentOutreachUniqueId, 'status', 'Outreach Sent - Awaiting Reply', true, true);
-             setTimeout(() => closeOutreachModal(), 2000);
-        } else {
-             document.getElementById('email-status-msg').textContent = 'Error: ' + data.message;
-             document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-red-600';
+    window.openOutreachModal = function(uniqueId, companyName) {
+        if (typeof isLoggedIn !== 'undefined' && !isLoggedIn) {
+            alert("You must be logged in to perform Outreach.");
+            return;
         }
-    })
-    .finally(() => {
-        btn.disabled = false;
-        btn.textContent = 'Send Now (via Backend)';
-    });
-}
-
-function generateMailto() {
-    const email = document.getElementById('outreach-target-email').value;
-    const name = document.getElementById('outreach-target-name').value;
-    const subject = encodeURIComponent(document.getElementById('email-subject').value);
-    const body = encodeURIComponent(document.getElementById('email-body').value);
-    
-    handleTriageUpdate(currentOutreachUniqueId, 'history', `Manually drafted email for ${name} at ${email}. Wait 3-4 days before calling.`, true, true);
-    handleTriageUpdate(currentOutreachUniqueId, 'status', 'Outreach Sent - Awaiting Reply', true, true);
-    window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
-}
-
-function executeCallLog() {
-    const name = document.getElementById('outreach-target-name').value;
-    const outcome = document.getElementById('call-outcome').value;
-    const notes = document.getElementById('call-notes').value;
-    
-    handleTriageUpdate(currentOutreachUniqueId, 'history', `Phone Attempt (${outcome}) for ${name}. Notes: ${notes}`, true, true);
-    alert('Call attempt logged successfully to Triage History!');
-    closeOutreachModal();
-}
-
-window.executeEventLog = async function() {
-    const name = document.getElementById('outreach-target-name').value;
-    const type = document.getElementById('event-type').value;
-    const notes = document.getElementById('event-notes').value;
-    
-    // Log the touchpoint with the custom [EVENT LOGGED] tag so history parser can find it for follow-up reminders
-    await handleTriageUpdate(currentOutreachUniqueId, 'history', `[EVENT LOGGED] ${type} interaction with ${name}. Notes: ${notes}`, true, true);
-    
-    alert('Manual event logged successfully and outreach clock reset!');
-    closeOutreachModal();
-}
-
-function openAddContactModal() {
-    closeOutreachModal();
-    document.getElementById('add-c-companyId').value = document.getElementById('outreach-company-id').value;
-    document.getElementById('add-c-uniqueId').value = document.getElementById('outreach-unique-id').value;
-    document.getElementById('add-c-name').value = '';
-    document.getElementById('add-c-email').value = '';
-    document.getElementById('add-c-title').value = '';
-    document.getElementById('add-c-status').textContent = '';
-    
-    const modal = document.getElementById('add-contact-modal');
-    modal.classList.remove('invisible', 'opacity-0');
-}
-
-function closeAddContactModal() {
-    const modal = document.getElementById('add-contact-modal');
-    modal.classList.add('invisible', 'opacity-0');
-}
-
-function saveNewContact() {
-    const name = document.getElementById('add-c-name').value;
-    const email = document.getElementById('add-c-email').value;
-    const title = document.getElementById('add-c-title').value;
-    const companyId = document.getElementById('add-c-companyId').value;
-    const uniqueId = document.getElementById('add-c-uniqueId').value;
-    
-    if (!name || !email) {
-        document.getElementById('add-c-status').textContent = 'Name and Email are required.';
-        document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-red-600';
-        return;
-    }
-    if (!companyId) {
-        document.getElementById('add-c-status').textContent = 'Company ID missing from Freshdesk search. Ensure company was found.';
-        document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-red-600';
-        return;
-    }
-    
-    const btn = document.getElementById('save-new-contact-btn');
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
-    
-    fetch(SHEET_URL, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'addcontact', name, email, title, companyId })
-    })
-    .then(res => res.text())
-    .then(rawText => {
-        console.log('📄 addcontact Raw Response:', rawText);
-        let data = JSON.parse(rawText);
-        if (data.status === 'success') {
-             document.getElementById('add-c-status').textContent = 'Successfully saved to Freshdesk! Restarting Cadence...';
-             document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-green-600';
-             handleTriageUpdate(uniqueId, 'history', `Harvested new Contact from Auto-Reply: ${name} (${email}).`, true);
-             setTimeout(() => {
-                 closeAddContactModal();
-                 openOutreachModal(uniqueId, currentOutreachCompany);
-             }, 1500);
-        } else {
-             const ver = data.gs_version ? ` (Backend v${data.gs_version})` : ' (Backend v1.2 or older)';
-             document.getElementById('add-c-status').textContent = 'Error: ' + data.message + ver;
-             document.getElementById('add-c-status').className = 'text-xs font-medium mt-2 text-red-600';
+        currentOutreachUniqueId = uniqueId;
+        currentOutreachCompany = companyName;
+        document.getElementById('outreach-unique-id').value = uniqueId;
+        document.getElementById('outreach-real-company-name').value = companyName;
+        document.getElementById('outreach-company-name').textContent = `Outreach: ${companyName}`;
+        document.getElementById('outreach-cadence-status').textContent = 'Fetching Contacts from Freshdesk...';
+        document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-indigo-600 mt-1';
+        
+        // Add Last Outreach Context
+        const status = getFollowUpStatus(triageDetails[uniqueId] || {status: 'New Response', history: []});
+        const lastOutreachSection = document.getElementById('outreach-cadence-status');
+        if (status && status.days !== Infinity) {
+            lastOutreachSection.innerHTML += ` <span class="text-xs text-gray-400 font-normal">| Last interaction: ${status.days}d ago</span>`;
         }
-    })
-    .finally(() => {
-        btn.disabled = false;
-        btn.textContent = 'Save to Freshdesk';
-    });
-}
+        
+        document.getElementById('outreach-contact-card').classList.add('hidden');
+        document.getElementById('outreach-actions').classList.add('hidden');
+        document.getElementById('outreach-no-contacts').classList.add('hidden');
+        document.getElementById('fail-contact-section').classList.add('hidden');
+        document.getElementById('email-composer').classList.add('hidden');
+        document.getElementById('call-logger').classList.add('hidden');
+
+        const modal = document.getElementById('outreach-modal');
+        modal.classList.remove('invisible', 'opacity-0');
+
+        fetch(`${SHEET_URL}?type=contacts&companyName=${encodeURIComponent(companyName)}`)
+        .then(res => res.text())
+        .then(rawText => {
+            let data;
+            try { data = JSON.parse(rawText); } catch(e) {
+                console.error('❌ Not valid JSON. Raw:', rawText.substring(0, 300));
+                window.renderNoContacts();
+                return;
+            }
+            if (data.status === 'success' && data.data && data.data.contacts) {
+                 currentOutreachContacts = data.data.contacts;
+                 currentOutreachIndex = 0;
+                 document.getElementById('outreach-company-id').value = data.data.companyId || '';
+                 window.renderCurrentContact();
+            } else {
+                 window.renderNoContacts();
+            }
+        })
+        .catch(err => {
+             console.error(err);
+             window.renderNoContacts();
+        });
+    }
+
+    window.closeOutreachModal = function() {
+        const modal = document.getElementById('outreach-modal');
+        modal.classList.add('invisible', 'opacity-0');
+    }
+
+    window.renderCurrentContact = function() {
+        if (currentOutreachContacts.length === 0 || currentOutreachIndex >= currentOutreachContacts.length) {
+            window.renderNoContacts();
+            return;
+        }
+        
+        const c = currentOutreachContacts[currentOutreachIndex];
+        document.getElementById('outreach-cadence-status').textContent = `Attempt ${currentOutreachIndex + 1} of ${currentOutreachContacts.length}: Freshdesk Contact Loaded.`;
+        document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-green-600 mt-1';
+        
+        document.getElementById('outreach-target-name').value = c.name;
+        document.getElementById('outreach-target-email').value = c.email;
+        
+        document.getElementById('outreach-c-name').textContent = c.name;
+        document.getElementById('outreach-c-title').textContent = c.job_title || 'No Title Listed';
+        document.getElementById('outreach-c-email').textContent = c.email;
+        
+        let greeting = "Hi,";
+        const eMatch = c.email.toLowerCase();
+        const isDistribution = (eMatch.indexOf('admin@') === 0 || eMatch.indexOf('info@') === 0 || eMatch.indexOf('it@') === 0 || eMatch.indexOf('support@') === 0 || eMatch.indexOf('team@') === 0 || !c.name || c.name.trim() === "");
+        
+        if (isDistribution) {
+            const realCoName = document.getElementById('outreach-real-company-name').value || "Team";
+            greeting = `Hi ${realCoName} Team,`;
+        } else {
+            const firstName = c.name.split(' ')[0];
+            greeting = `Hi ${firstName},`;
+        }
+        
+        const bodyText = `${greeting}\n\nI noticed we haven't touched base in a while. Since we've seen some shifting workflows recently, I wanted to reach out to ensure everything is running smoothly with CLEAN_Address.\n\nLet me know if you need anything!\n\nBest,`;
+        document.getElementById('email-body').value = bodyText;
+
+        document.getElementById('outreach-contact-card').classList.remove('hidden');
+        document.getElementById('outreach-actions').classList.remove('hidden');
+        document.getElementById('fail-contact-section').classList.remove('hidden');
+        document.getElementById('outreach-no-contacts').classList.add('hidden');
+        document.getElementById('email-composer').classList.add('hidden');
+        document.getElementById('call-logger').classList.add('hidden');
+    }
+
+    window.renderNoContacts = function() {
+        document.getElementById('outreach-cadence-status').textContent = 'All Valid Contacts Exhausted.';
+        document.getElementById('outreach-cadence-status').className = 'text-sm font-semibold text-red-600 mt-1';
+        document.getElementById('outreach-contact-card').classList.add('hidden');
+        document.getElementById('outreach-actions').classList.add('hidden');
+        document.getElementById('fail-contact-section').classList.add('hidden');
+        document.getElementById('outreach-no-contacts').classList.remove('hidden');
+        handleTriageUpdate(currentOutreachUniqueId, 'status', 'Requires CS Review - DNC/Exhausted', true, true);
+    }
+
+    window.failCurrentContact = function() {
+        const c = currentOutreachContacts[currentOutreachIndex];
+        handleTriageUpdate(currentOutreachUniqueId, 'history', `Cadence Failed for ${c.name} (${c.email}). Moving to next contact.`, true);
+        currentOutreachIndex++;
+        window.renderCurrentContact();
+    }
+
+    window.executeEmailSend = function() {
+        const email = document.getElementById('outreach-target-email').value;
+        const name = document.getElementById('outreach-target-name').value;
+        const subject = document.getElementById('email-subject').value;
+        const body = document.getElementById('email-body').value;
+        const company = document.getElementById('outreach-real-company-name').value;
+        
+        const btn = document.getElementById('send-outreach-btn');
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                 document.getElementById('email-status-msg').textContent = 'Email sent successfully via Code.gs!';
+                 document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-green-600';
+                 handleTriageUpdate(currentOutreachUniqueId, 'history', `Emailed ${name} at ${email}. Wait 3-4 days before calling.`, true, true);
+                 handleTriageUpdate(currentOutreachUniqueId, 'status', 'Outreach Sent - Awaiting Reply', true, true);
+                 setTimeout(() => window.closeOutreachModal(), 2000);
+            } else {
+                 document.getElementById('email-status-msg').textContent = 'Error: ' + data.message;
+                 document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-red-600';
+            }
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = 'Send Now (via Backend)';
+        });
+    }
+
+    window.generateMailto = function() {
+        const email = document.getElementById('outreach-target-email').value;
+        const name = document.getElementById('outreach-target-name').value;
+        const subject = encodeURIComponent(document.getElementById('email-subject').value);
+        const body = encodeURIComponent(document.getElementById('email-body').value);
+        
+        handleTriageUpdate(currentOutreachUniqueId, 'history', `Manually drafted email for ${name} at ${email}. Wait 3-4 days before calling.`, true, true);
+        handleTriageUpdate(currentOutreachUniqueId, 'status', 'Outreach Sent - Awaiting Reply', true, true);
+        window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
+    }
+
+    window.executeCallLog = function() {
+        const name = document.getElementById('outreach-target-name').value;
+        const outcome = document.getElementById('call-outcome').value;
+        const notes = document.getElementById('call-notes').value;
+        
+        handleTriageUpdate(currentOutreachUniqueId, 'history', `Phone Attempt (${outcome}) for ${name}. Notes: ${notes}`, true, true);
+        alert('Call attempt logged successfully to Triage History!');
+        window.closeOutreachModal();
+    }
+
+    window.executeEventLog = async function() {
+        const name = document.getElementById('outreach-target-name').value;
+        const type = document.getElementById('event-type').value;
+        const notes = document.getElementById('event-notes').value;
+        
+        await handleTriageUpdate(currentOutreachUniqueId, 'history', `[EVENT LOGGED] ${type} interaction with ${name}. Notes: ${notes}`, true, true);
+        
+        alert('Manual event logged successfully and outreach clock reset!');
+        window.closeOutreachModal();
+    }
+
+    window.openAddContactModal = function() {
+        window.closeOutreachModal();
+        document.getElementById('add-c-companyId').value = document.getElementById('outreach-company-id').value;
+        document.getElementById('add-c-uniqueId').value = document.getElementById('outreach-unique-id').value;
+        document.getElementById('add-c-name').value = '';
+        document.getElementById('add-c-email').value = '';
+        document.getElementById('add-c-title').value = '';
+        document.getElementById('add-c-status').textContent = '';
+        
+        const modal = document.getElementById('add-contact-modal');
+        modal.classList.remove('invisible', 'opacity-0');
+    }
+
+    window.closeAddContactModal = function() {
+        const modal = document.getElementById('add-contact-modal');
+        modal.classList.add('invisible', 'opacity-0');
+    }
+
+    window.saveNewContact = function() {
+        const name = document.getElementById('add-c-name').value;
+        const email = document.getElementById('add-c-email').value;
+        const title = document.getElementById('add-c-title').value;
+        const companyId = document.getElementById('add-c-companyId').value;
+        const uniqueId = document.getElementById('add-c-uniqueId').value;
+        
+        if (!name || !email) {
+            document.getElementById('add-c-status').textContent = 'Name and Email are required.';
+            return;
+        }
+        
+        const btn = document.getElementById('save-new-contact-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'addcontact', name, email, title, companyId })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                 handleTriageUpdate(uniqueId, 'history', `Harvested new Contact from Auto-Reply: ${name} (${email}).`, true);
+                 setTimeout(() => {
+                     window.closeAddContactModal();
+                     window.openOutreachModal(uniqueId, currentOutreachCompany);
+                 }, 1500);
+            }
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = 'Save to Freshdesk';
+        });
+    }
+});
