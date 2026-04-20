@@ -3,7 +3,7 @@ const https = require('https');
 const BASE = 'script.google.com';
 const SCRIPT_PATH = '/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ1y8hdlqfU4FCGquP0--BmDzHemCOHnN4w2qEUZtmdyXwxz/exec';
 const company = 'Augusta University';
-const query = `?type=contacts&companyName=${encodeURIComponent(company)}`;
+const query = '';
 
 function get(host, path, cb) {
   https.get({ hostname: host, path: path }, (res) => {
