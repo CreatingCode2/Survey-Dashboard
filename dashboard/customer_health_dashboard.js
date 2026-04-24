@@ -808,9 +808,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const followUp = getFollowUpStatus(item);
             let badgeHtml = '';
             if (followUp) {
-                const dayLabel = followUp.days === 0 ? 'NEW' : `${followUp.days}d`;
-                if (followUp.level === 'critical') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded animate-pulse">🔴 FOLLOW-UP (${dayLabel})</span>`;
-                else if (followUp.level === 'warning') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-orange-500 text-white text-[10px] font-bold rounded">🟠 FOLLOW-UP (${dayLabel})</span>`;
+                if (followUp.label === 'NEW') {
+                    const bgClass = followUp.level === 'critical' ? 'bg-red-600 animate-pulse' : 'bg-orange-500';
+                    const icon = followUp.level === 'critical' ? '🔴' : '🟠';
+                    badgeHtml = `<span class="ml-2 px-2 py-0.5 ${bgClass} text-white text-[10px] font-bold rounded">${icon} INITIAL TOUCH DUE</span>`;
+                } else {
+                    if (followUp.level === 'critical') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded animate-pulse">🔴 10 Day Due: Final Email (${followUp.days}d)</span>`;
+                    else if (followUp.level === 'warning') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-orange-500 text-white text-[10px] font-bold rounded">🟠 4 Day Due: Call (${followUp.days}d)</span>`;
+                }
             }
 
             const card = document.createElement('div');
@@ -1956,7 +1961,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const card = document.createElement('div');
             card.className = `triage-card score-${item.happiness} rounded-lg p-4 grid grid-cols-1 md:grid-cols-5 gap-4 items-center transition shadow-sm`;
 
+            const followUp = getFollowUpStatus(item);
             let badgeHtml = '';
+            if (followUp) {
+                if (followUp.label === 'NEW') {
+                    const bgClass = followUp.level === 'critical' ? 'bg-red-600 animate-pulse' : 'bg-orange-500';
+                    const icon = followUp.level === 'critical' ? '🔴' : '🟠';
+                    badgeHtml = `<span class="ml-2 px-2 py-0.5 ${bgClass} text-white text-[10px] font-bold rounded">${icon} INITIAL TOUCH DUE</span>`;
+                } else {
+                    if (followUp.level === 'critical') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded animate-pulse">🔴 10 Day Due: Final Email (${followUp.days}d)</span>`;
+                    else if (followUp.level === 'warning') badgeHtml = `<span class="ml-2 px-2 py-0.5 bg-orange-500 text-white text-[10px] font-bold rounded">🟠 4 Day Due: Call (${followUp.days}d)</span>`;
+                }
+            }
 
             const csmOptions = CSMs.map(csm => `<option value="${csm}" ${item.assignedCsm === csm ? 'selected' : ''}>${csm}</option>`).join('');
             const allStatusOptionsWithArchive = ALL_STATUS_OPTIONS.map(s => `<option value="${s}" ${item.status === s ? 'selected' : ''}>${s}</option>`).join('');
