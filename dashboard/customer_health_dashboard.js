@@ -601,6 +601,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (field === 'csm') triageDetails[uId].assignedCsm = val;
                             if (field === 'status') triageDetails[uId].status = val;
                             
+                            // Track if CSM was explicitly set (even to Unassigned) to differentiate from default Unassigned
+                            if (field === 'csm') triageDetails[uId].csmExplicitlySet = true;
+                            
                             triageDetails[uId].history.push({
                                 status: triageDetails[uId].status,
                                 csm: triageDetails[uId].assignedCsm,
@@ -695,7 +698,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 let assignedCsm = 'Unassigned';
                 let status = 'New Response';
-                if (triageDetails[uniqueId]) {
+                
+                // If we have some triage history, but CSM is still the default 'Unassigned' and was never explicitly assigned
+                const needsRoundRobin = !triageDetails[uniqueId] || (triageDetails[uniqueId].assignedCsm === 'Unassigned' && !triageDetails[uniqueId].csmExplicitlySet);
+
+                if (!needsRoundRobin) {
                     assignedCsm = triageDetails[uniqueId].assignedCsm;
                     status = triageDetails[uniqueId].status;
                     
@@ -723,8 +730,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     currentRoundRobinCsm = nextCsm; // Update loop tracker
                     
-                    triageDetails[uniqueId] = { assignedCsm: nextCsm, status: 'New Response', history: [] };
+                    if (!triageDetails[uniqueId]) triageDetails[uniqueId] = { assignedCsm: nextCsm, status: 'New Response', history: [] };
+                    else triageDetails[uniqueId].assignedCsm = nextCsm;
+                    
                     assignedCsm = nextCsm;
+                    triageDetails[uniqueId].csmExplicitlySet = true;
                     
                     if (isLoggedIn) {
                         setTimeout(() => handleTriageUpdate(uniqueId, 'csm', nextCsm, true), Math.random() * 2000 + 1000);
@@ -1380,8 +1390,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const snoozeExpiry = item.snoozeUntil ? new Date(item.snoozeUntil) : null;
         const now = new Date();
 
-        // 1. Find the latest outreach/touchpoint in history
+        // 1. Find the initial and latest outreach in history
+        let initialTouchpointTs = 0;
         let latestTouchpointTs = 0;
+        let touchCount = 0;
         const TOUCH_KEYWORDS = ['emailed', 'phone attempt', 'cadence', 'outreach sent', 'call logged', 'event logged', 'manually drafted email'];
 
         history.forEach(h => {
@@ -1390,28 +1402,41 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const hasTouchKeyword = TOUCH_KEYWORDS.some(kw => change.includes(kw));
             
-            // Check for explicit touches
             if (hasTouchKeyword) {
-                if (hTs > latestTouchpointTs) latestTouchpointTs = hTs;
+                if (initialTouchpointTs === 0 || hTs < initialTouchpointTs) {
+                    initialTouchpointTs = hTs;
+                }
+                if (hTs > latestTouchpointTs) {
+                    latestTouchpointTs = hTs;
+                }
+                touchCount++;
             }
         });
 
-        if (latestTouchpointTs === 0) return null;
+        if (initialTouchpointTs === 0) return null;
 
-        // 2. Adjust baseline for Snooze Expiry
-        // If they were snoozed and the snooze just expired, we use the snooze expiry as the baseline 
-        // to avoid "Red" alerts the moment they wake up.
-        let baselineTs = latestTouchpointTs;
-        if (snoozeExpiry && snoozeExpiry < now && snoozeExpiry > latestTouchpointTs) {
-            baselineTs = snoozeExpiry.getTime();
+        // If currently snoozed, hide entirely
+        if (snoozeExpiry && snoozeExpiry > now) {
+            return null;
         }
 
-        const daysElapsed = (now - baselineTs) / (24 * 60 * 60 * 1000);
+        // Calculate days relative to the FIRST touch point mapping to the business workflow (Day 0, Day 4, Day 10)
+        let daysElapsed = (now - initialTouchpointTs) / (24 * 60 * 60 * 1000);
+        let daysSinceLatestTouch = (now - latestTouchpointTs) / (24 * 60 * 60 * 1000);
 
-        if (daysElapsed >= 10) return { level: 'critical', days: Math.floor(daysElapsed) };
-        if (daysElapsed >= 4) return { level: 'warning', days: Math.floor(daysElapsed) };
+        if (daysElapsed >= 10) {
+            // Require 3 touches by day 10. If they have done it very recently, suppress.
+            if (touchCount < 3 || daysSinceLatestTouch > 4) {
+                 return { level: 'critical', days: Math.floor(daysElapsed) };
+            }
+        } else if (daysElapsed >= 4) {
+            // Require 2 touches by day 4.
+            if (touchCount < 2 || daysSinceLatestTouch > 4) {
+                 return { level: 'warning', days: Math.floor(daysElapsed) };
+            }
+        }
         
-        return { level: 'normal', days: Math.floor(daysElapsed) };
+        return null;
     }
     window.getFollowUpStatus = getFollowUpStatus;
 
