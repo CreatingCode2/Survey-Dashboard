@@ -699,24 +699,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 let assignedCsm = 'Unassigned';
                 let status = 'New Response';
                 
-                // If we have some triage history, but CSM is still the default 'Unassigned' and was never explicitly assigned, AND the status is still 'New Response'
-                const needsRoundRobin = !triageDetails[uniqueId] || (triageDetails[uniqueId].assignedCsm === 'Unassigned' && !triageDetails[uniqueId].csmExplicitlySet && triageDetails[uniqueId].status === 'New Response');
-
-                if (!needsRoundRobin) {
+                if (triageDetails[uniqueId]) {
                     assignedCsm = triageDetails[uniqueId].assignedCsm;
                     status = triageDetails[uniqueId].status;
-                    
-                    if (status === 'Inactive - Canceled') continue;
-                    
-                    // Snooze logic
-                    if (triageDetails[uniqueId].snoozeUntil) {
-                        const snoozeDate = new Date(triageDetails[uniqueId].snoozeUntil);
-                        if (now < snoozeDate) {
-                             continue; // Skip this company, it's currently snoozed
-                        }
-                    }
-                } else {
-                    // Round Robin Assignment using state tracker
+                }
+
+                if (status === 'Inactive - Canceled') continue;
+                
+                // Snooze logic
+                if (triageDetails[uniqueId] && triageDetails[uniqueId].snoozeUntil) {
+                    const snoozeDate = new Date(triageDetails[uniqueId].snoozeUntil);
+                    if (now < snoozeDate) continue;
+                }
+                
+                const missingCsm = assignedCsm === 'Unassigned' && (!triageDetails[uniqueId] || !triageDetails[uniqueId].csmExplicitlySet);
+                
+                if (missingCsm) {
                     let nextCsm = 'Misty Wilmore';
                     if (CSMs && CSMs.length > 0) {
                         const lastIndex = CSMs.indexOf(currentRoundRobinCsm);
@@ -728,12 +726,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else if (currentRoundRobinCsm === 'Misty Wilmore') {
                         nextCsm = 'Tonja Jones';
                     }
-                    currentRoundRobinCsm = nextCsm; // Update loop tracker
-                    
-                    if (!triageDetails[uniqueId]) triageDetails[uniqueId] = { assignedCsm: nextCsm, status: 'New Response', history: [] };
-                    else triageDetails[uniqueId].assignedCsm = nextCsm;
+                    currentRoundRobinCsm = nextCsm;
                     
                     assignedCsm = nextCsm;
+                    if (!triageDetails[uniqueId]) triageDetails[uniqueId] = { assignedCsm: nextCsm, status: status, history: [] };
+                    else triageDetails[uniqueId].assignedCsm = nextCsm;
+                    
                     triageDetails[uniqueId].csmExplicitlySet = true;
                     
                     if (isLoggedIn) {
@@ -751,7 +749,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     lastTicketFormatted: lastTicketFormatted,
                     group: group,
                     assignedCsm: assignedCsm,
-                    status: status
+                    status: status,
+                    history: triageDetails[uniqueId] ? triageDetails[uniqueId].history : []
                 });
             }
         }
@@ -1391,7 +1390,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!isFollowUpStatus) return null;
 
-        const history = item.history || [];
+        const history = item.history || item.triageHistory || [];
         const snoozeExpiry = item.snoozeUntil ? new Date(item.snoozeUntil) : null;
         const now = new Date();
 
