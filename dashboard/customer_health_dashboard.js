@@ -1366,9 +1366,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const idx = engagementBlackoutCustomers.findIndex(d => d.uniqueId === uniqueId);
             if (idx !== -1) {
                 companyName = engagementBlackoutCustomers[idx].company;
-                // Pre-emptively update engagementBlackoutCustomers array so it's fresh when re-rendered
-                engagementBlackoutCustomers[idx].assignedCsm = field === 'csm' ? value : triageDetails[uniqueId].assignedCsm;
-                engagementBlackoutCustomers[idx].status = field === 'status' ? value : triageDetails[uniqueId].status;
+                // When changing status, preserve the CSM that's already on the card (may have been set by round-robin).
+                // When changing csm, use the new value directly.
+                // NEVER read assignedCsm back from triageDetails here — it may be stale/Unassigned if the DB
+                // never had a csm record (accounts assigned only by in-memory round-robin).
+                if (field === 'csm') {
+                    engagementBlackoutCustomers[idx].assignedCsm = value;
+                }
+                if (field === 'status') {
+                    engagementBlackoutCustomers[idx].status = value;
+                }
             }
         } else {
             const record = rawResponses.find(d => d.uniqueId === uniqueId);
