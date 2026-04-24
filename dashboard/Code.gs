@@ -348,6 +348,7 @@ function doPost(e) {
       var targetEmail = postData.email;
       var targetName = postData.name || '';
       var ccEmails = postData.cc || '';
+      var bccEmails = postData.bcc || '';
       var subject = postData.subject || 'Checking in';
       var body = postData.body || 'Hi,\nJust checking in.\n\nThanks';
 
@@ -366,6 +367,7 @@ function doPost(e) {
          replyTo: 'support@runnertechnologies.com'
       };
       if (ccEmails) mailOptions.cc = ccEmails;
+      if (bccEmails) mailOptions.bcc = bccEmails;
 
       try {
         GmailApp.sendEmail(targetEmail, subject, body, mailOptions);
@@ -432,6 +434,47 @@ function doPost(e) {
          }
       }
       return jsonResponse('error', 'Failed to add contact to Freshdesk. ' + respText);
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: markContactInvalid
+    // ----------------------------------------------------------------
+    if (action === 'markContactInvalid') {
+      var emailToMark = postData.email;
+      if (!emailToMark) return jsonResponse('error', 'Missing email.');
+
+      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+
+      var searchUrl = 'https://runnertech.freshdesk.com/api/v2/contacts?email=' + encodeURIComponent(emailToMark);
+      var sRes = UrlFetchApp.fetch(searchUrl, { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true });
+
+      if (sRes.getResponseCode() === 200) {
+         var existingList = JSON.parse(sRes.getContentText());
+         if (existingList && existingList.length > 0) {
+            var contactId = existingList[0].id;
+            var updateUrl = 'https://runnertech.freshdesk.com/api/v2/contacts/' + contactId;
+            var updatePayload = { 
+                custom_fields: { do_not_contact_: true } 
+            };
+            
+            var updateRes = UrlFetchApp.fetch(updateUrl, {
+              'method': 'put',
+              'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+              'payload': JSON.stringify(updatePayload),
+              'muteHttpExceptions': true
+            });
+            if (updateRes.getResponseCode() === 200) {
+                return jsonResponse('success', 'Contact marked as Do Not Contact in Freshdesk.');
+            } else {
+                return jsonResponse('error', 'Failed to update contact: ' + updateRes.getContentText());
+            }
+         } else {
+             return jsonResponse('error', 'Contact not found.');
+         }
+      } else {
+          return jsonResponse('error', 'Failed to search Freshdesk.');
+      }
     }
 
     // ----------------------------------------------------------------
@@ -627,4 +670,96 @@ function syncFreshdesk() {
 
   sheet.getRange(1, 1, output.length, 2).setValues(output);
   Logger.log('Successfully synced Freshdesk data! Total companies processed: ' + (output.length - 1));
+}
+
+function autoFlagExhaustedAccounts() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  if (!apiKey) {
+    Logger.log('Error: Freshdesk_Api_Key not found.');
+    return;
+  }
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true };
+  var domain = 'runnertech.freshdesk.com';
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var fdSheet = ss.getSheetByName('Freshdesk_Data');
+  var triageSheet = ss.getSheetByName('Triage_Data');
+  
+  if (!fdSheet || !triageSheet) return;
+
+  var fdData = fdSheet.getDataRange().getValues();
+  var triageData = triageSheet.getDataRange().getValues();
+  
+  // 1. Find all "active" companies in the Triage Data (get their latest status)
+  var triageStatus = {};
+  for (var i = 1; i < triageData.length; i++) {
+    if (triageData[i][2] === 'status') {
+      triageStatus[triageData[i][1]] = triageData[i][3]; 
+    }
+  }
+
+  // 2. Iterate companies in Freshdesk Data
+  for (var f = 1; f < fdData.length; f++) {
+    var companyName = fdData[f][0];
+    var companyId = fdData[f][2];
+    if (!companyId) continue;
+    
+    var currentStatus = triageStatus[companyName];
+    // Skip if already flagged or canceled
+    if (currentStatus === 'Requires CS Review - DNC/Exhausted' || currentStatus === 'Inactive - Canceled' || currentStatus === 'Archived') {
+       continue;
+    }
+
+    // Check contacts
+    var validCount = 0;
+    var cRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/contacts?company_id=' + companyId + '&per_page=100', fdOpts);
+    if (cRes.getResponseCode() === 200) {
+      var cts = JSON.parse(cRes.getContentText());
+      for (var j = 0; j < cts.length; j++) {
+        var c = cts[j];
+        var cn = (c.name || '').toLowerCase();
+        if (cn.indexOf('- do not contact') !== -1 || cn.indexOf('- retired') !== -1 || cn.indexOf(' retired') !== -1) continue;
+        if (!c.email) continue;
+        validCount++;
+      }
+    }
+
+    // If zero valid contacts flag it
+    if (validCount === 0) {
+      var uniqueId = Utilities.getUuid();
+      var timestamp = new Date().toISOString();
+      triageSheet.appendRow([uniqueId, companyName, 'status', 'Requires CS Review - DNC/Exhausted', timestamp, 'System', 'system@runnertechnologies.com', 'System: Account flagged because all Freshdesk contacts are marked DNC/Retired or missing.']);
+      Logger.log("Flagged " + companyName + " as Exhausted.");
+      
+      // Email alert corresponding to exhaustion
+      var csmSearch = 'Unassigned';
+      for (var r = triageData.length - 1; r >= 1; r--) {
+        if (triageData[r][1] === companyName && triageData[r][2] === 'csm') {
+          csmSearch = triageData[r][3];
+          break;
+        }
+      }
+      if (csmSearch !== 'Unassigned') {
+        var emailExhaust = "";
+        if (csmSearch === "Misty Wilmore") emailExhaust = "misty.wilmore@runnertechnologies.com";
+        else if (csmSearch === "Tonja Jones") emailExhaust = "tonja.jones@runnertechnologies.com";
+        
+        if (emailExhaust !== "") {
+          var subjectExhaust = "Outreach Alert: " + companyName + " Contacts Exhausted";
+          var bodyExhaust = "Hello " + csmSearch + ",\n\n" +
+                     "All known contacts for " + companyName + " have either failed the cadence or are marked Do Not Contact/Retired.\n\n" +
+                     "Please perform manual research to find a new contact. Once you find one, open the dashboard's Engagement Blackout View and click [+ Add Researched Contact] to seamlessly inject them into the cadence.\n\n" +
+                     "Best,\nCustomer Health Automation";
+          try {
+            GmailApp.sendEmail(emailExhaust, subjectExhaust, bodyExhaust, {
+              from: "customersuccess@runnertechnologies.com"
+            });
+          } catch(e) {
+            MailApp.sendEmail(emailExhaust, subjectExhaust, bodyExhaust);
+          }
+        }
+      }
+    }
+  }
 }

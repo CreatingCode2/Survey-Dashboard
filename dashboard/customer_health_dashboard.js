@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { name: 'Misty Wilmore', email: 'misty.wilmore@runnertechnologies.com', role: 'admin' },
         { name: 'Tonja Jones',   email: 'tonja.jones@runnertechnologies.com',   role: 'csm'   }
     ];
-    const ALL_STATUS_OPTIONS = ['New Response', 'Followed Up - Low Risk', 'Followed Up - High Risk', 'Archived'];
+    const ALL_STATUS_OPTIONS = ['New Response', 'Followed Up - Low Risk', 'Followed Up - High Risk', 'Archived', 'Inactive - Canceled'];
 
     const COLUMN_MAP = {
         'Timestamp': 'date',
@@ -699,6 +699,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     assignedCsm = triageDetails[uniqueId].assignedCsm;
                     status = triageDetails[uniqueId].status;
                     
+                    if (status === 'Inactive - Canceled') continue;
+                    
                     // Snooze logic
                     if (triageDetails[uniqueId].snoozeUntil) {
                         const snoozeDate = new Date(triageDetails[uniqueId].snoozeUntil);
@@ -756,83 +758,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('blackout-count-badge').textContent = severeItems.length;
         
         renderBlackoutList();
+        updateCsmDropdowns();
     }
 
-    // --- FOLLOW-UP REMINDER LOGIC ---
-    // Returns null (no badge needed) or { level: 'warning'|'critical', days, label }
-    // Levels:
-    //   'warning'  = 4+ days since last outreach touch  → 🟠 (2nd touch due)
-    //   'critical' = 10+ days since last outreach touch → 🔴 (3rd touch / escalate)
-    //   'new'      = never touched at all (show NEW badge as critical)
-    function getFollowUpStatus(item) {
-        // Pull triage detail for this item so we can read outreach history
-        const uniqueId = item.uniqueId;
-        const detail = (typeof triageDetails !== 'undefined' && triageDetails[uniqueId])
-            ? triageDetails[uniqueId]
-            : item; // fallback to item itself if passed directly
-
-        const history = Array.isArray(detail.history) ? detail.history : [];
-        const currentStatus = detail.status || item.status || 'New Response';
-
-        // Keywords that indicate an outreach touch happened
-        const TOUCH_KEYWORDS = [
-            'emailed', 'phone attempt', 'cadence', 'outreach sent',
-            '[event logged]', 'manually drafted email'
-        ];
-
-        // Find the most recent history entry that represents an outreach touch
-        let lastTouchDate = null;
-        for (let i = history.length - 1; i >= 0; i--) {
-            const entry = history[i];
-            const changeText = (entry.change || '').toLowerCase();
-            const hasTouchKeyword = TOUCH_KEYWORDS.some(kw => changeText.includes(kw));
-            if (hasTouchKeyword && entry.timestamp) {
-                const d = new Date(entry.timestamp);
-                if (!isNaN(d.getTime())) {
-                    lastTouchDate = d;
-                    break;
-                }
-            }
-        }
-
-        const now = new Date();
-
-        // If the account has been contacted before, compute days since last touch
-        if (lastTouchDate) {
-            const daysSince = Math.floor((now - lastTouchDate) / (1000 * 60 * 60 * 24));
-
-            // Only show reminders if still awaiting a reply (not resolved/archived)
-            const isAwaitingReply = currentStatus === 'Outreach Sent - Awaiting Reply'
-                || currentStatus === 'New Response'
-                || currentStatus === 'Requires CS Review - DNC/Exhausted';
-
-            if (!isAwaitingReply) return null;
-
-            if (daysSince >= 10) {
-                return { level: 'critical', days: daysSince, label: `🔴 10-Day Follow-Up! (${daysSince}d)` };
-            } else if (daysSince >= 4) {
-                return { level: 'warning', days: daysSince, label: `🟠 4-Day Follow-Up (${daysSince}d)` };
-            }
-            return null; // touched recently, no reminder needed
-        }
-
-        // Never touched — show a NEW badge so CSMs know it needs a first contact
-        if (currentStatus === 'New Response') {
-            const isSilent = typeof item.daysSinceLastTicket !== 'undefined';
-            if (isSilent) {
-                const days = item.daysSinceLastTicket;
-                if (days === Infinity || days > 365) {
-                    return { level: 'critical', days: 0, label: '🔴 NEW – 1st Touch Needed' };
-                } else if (days > 180) {
-                    return { level: 'warning', days: 0, label: '🟠 NEW – 1st Touch Needed' };
-                }
-            }
-        }
-
-        return null;
-    }
-    window.getFollowUpStatus = getFollowUpStatus; // expose to global openOutreachModal
-    // --- END FOLLOW-UP REMINDER LOGIC ---
+// Old getFollowUpStatus has been removed.
 
     function renderBlackoutList() {
         const listEl = document.getElementById('blackout-list');
@@ -1328,15 +1257,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateCsmDropdowns() {
         const triageCsmFilter = document.getElementById('triageCsmFilter');
-        const currentValue = triageCsmFilter.value;
-        triageCsmFilter.innerHTML = '<option value="all">All CSMs</option>';
+        const blackoutCsmFilter = document.getElementById('blackoutCsmFilter');
+        
+        const triageCounts = {};
+        const blackoutCounts = {};
         CSMs.forEach(csm => {
-            const option = document.createElement('option');
-            option.value = csm;
-            option.textContent = csm;
-            triageCsmFilter.appendChild(option);
+             triageCounts[csm] = rawResponses.filter(d => d.happiness <= 3 && d.status !== 'Archived' && d.assignedCsm === csm).length;
+             blackoutCounts[csm] = (typeof engagementBlackoutCustomers !== 'undefined' && engagementBlackoutCustomers) ? engagementBlackoutCustomers.filter(c => c.assignedCsm === csm).length : 0;
         });
-        triageCsmFilter.value = currentValue;
+
+        if (triageCsmFilter) {
+            const currentTValue = triageCsmFilter.value;
+            triageCsmFilter.innerHTML = '<option id="triageCsmAllOption" value="all">All CSMs</option>';
+            CSMs.forEach(csm => {
+                const opt = document.createElement('option');
+                opt.value = csm;
+                opt.textContent = `${csm} (${triageCounts[csm] || 0})`;
+                triageCsmFilter.appendChild(opt);
+            });
+            triageCsmFilter.value = currentTValue || 'all';
+        }
+
+        if (blackoutCsmFilter) {
+            const currentBValue = blackoutCsmFilter.value;
+            blackoutCsmFilter.innerHTML = '<option id="blackoutCsmAllOption" value="all">All CSMs</option>';
+            CSMs.forEach(csm => {
+                const opt = document.createElement('option');
+                opt.value = csm;
+                opt.textContent = `${csm} (${blackoutCounts[csm] || 0})`;
+                blackoutCsmFilter.appendChild(opt);
+            });
+            blackoutCsmFilter.value = currentBValue || 'all';
+        }
     }
 
     window.handleTriageUpdate = async (uniqueId, field, value, isBlackout = false, silent = false) => {
@@ -1406,7 +1358,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- FOLLOW-UP REMINDER LOGIC ---
 
     function getFollowUpStatus(item) {
-        const isFollowUpStatus = item.status === 'Outreach Sent - Awaiting Reply';
+        // Any status that is not Archived or Canceled should be eligible for badges if touches occurred
+        const isFollowUpStatus = item.status !== 'Archived' && item.status !== 'Inactive - Canceled';
         const isNewResponse = item.status === 'New Response';
         const isSilentAccount = typeof item.daysSinceLastTicket !== 'undefined';
 
@@ -1428,19 +1381,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const now = new Date();
 
         // 1. Find the latest outreach/touchpoint in history
-        // Includes: Status updates to "Outreach Sent", Logged Calls, or Manual Events
         let latestTouchpointTs = 0;
+        const TOUCH_KEYWORDS = ['emailed', 'phone attempt', 'cadence', 'outreach sent', 'call logged', 'event logged', 'manually drafted email'];
 
         history.forEach(h => {
             const hTs = new Date(h.timestamp).getTime();
             const change = h.change ? h.change.toLowerCase() : '';
             
-            // Check for status update to Outreach Sent
-            if (h.status === 'Outreach Sent - Awaiting Reply') {
-                if (hTs > latestTouchpointTs) latestTouchpointTs = hTs;
-            }
-            // Check for manual logs (Call or Event)
-            if (change.includes('call logged') || change.includes('event logged')) {
+            const hasTouchKeyword = TOUCH_KEYWORDS.some(kw => change.includes(kw));
+            
+            // Check for explicit touches
+            if (hasTouchKeyword) {
                 if (hTs > latestTouchpointTs) latestTouchpointTs = hTs;
             }
         });
@@ -1462,6 +1413,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         return { level: 'normal', days: Math.floor(daysElapsed) };
     }
+    window.getFollowUpStatus = getFollowUpStatus;
 
     window.handleDrillDownClick = function (event, elements, chart) {
         if (!elements || elements.length === 0 || !chart) return;
@@ -1953,6 +1905,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (triageState.status !== 'Archived') {
             triageItems = triageItems.filter(d => d.status !== 'Archived');
         }
+        triageItems = triageItems.filter(d => d.status !== 'Inactive - Canceled');
 
         if (triageState.csm !== 'all') {
             triageItems = triageItems.filter(d => d.assignedCsm === triageState.csm);
@@ -2139,13 +2092,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderDataTable(data);
     }
 
-    const csmFilterEl = document.getElementById('triageCsmFilter');
-    CSMs.forEach(csm => {
-        const option = document.createElement('option');
-        option.value = csm;
-        option.textContent = csm;
-        csmFilterEl.appendChild(option);
-    });
+    updateCsmDropdowns();
 
     const triageCsmFilter = document.getElementById('triageCsmFilter');
     const triageStatusFilter = document.getElementById('triageStatusFilter');
@@ -2172,17 +2119,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const blackoutCsmFilter = document.getElementById('blackoutCsmFilter');
     if (blackoutCsmFilter) {
-        // Populate with CSM names
-        CSMs.forEach(csm => {
-            if (!blackoutCsmFilter.querySelector(`option[value="${csm}"]`)) {
-                const opt = document.createElement('option');
-                opt.value = csm;
-                opt.textContent = csm;
-                blackoutCsmFilter.appendChild(opt);
-            }
-        });
         blackoutCsmFilter.addEventListener('change', function(e) {
             triageState.blackoutCsm = e.target.value;
             renderBlackoutList();
@@ -2371,12 +2308,52 @@ document.addEventListener('DOMContentLoaded', () => {
         window.renderCurrentContact();
     }
 
+    window.sendTestEmail = function() {
+        const email = currentUser.email;
+        if (!email) {
+            alert('Cannot determine your email. Only logged in users can send test emails.');
+            return;
+        }
+        const name = document.getElementById('outreach-target-name').value;
+        const subject = "[TEST] " + document.getElementById('email-subject').value;
+        const body = document.getElementById('email-body').value;
+        const company = document.getElementById('outreach-real-company-name').value;
+        
+        const btn = document.getElementById('test-email-btn');
+        btn.disabled = true;
+        btn.textContent = 'Sending Test...';
+        
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company })
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.textContent = 'Test (Send to Me)';
+            if (data.status === 'success') {
+                 document.getElementById('email-status-msg').textContent = 'Test email sent successfully to your inbox!';
+                 document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-green-600';
+            } else {
+                 document.getElementById('email-status-msg').textContent = 'Error sending test email: ' + (data.message || 'Unknown error');
+                 document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-red-600';
+            }
+        })
+        .catch(err => {
+             btn.disabled = false;
+             btn.textContent = 'Test (Send to Me)';
+             document.getElementById('email-status-msg').textContent = String(err);
+             document.getElementById('email-status-msg').className = 'text-xs font-medium mt-2 text-red-600';
+        });
+    }
+
     window.executeEmailSend = function() {
         const email = document.getElementById('outreach-target-email').value;
         const name = document.getElementById('outreach-target-name').value;
         const subject = document.getElementById('email-subject').value;
         const body = document.getElementById('email-body').value;
         const company = document.getElementById('outreach-real-company-name').value;
+        const bccMe = document.getElementById('bcc-me') ? document.getElementById('bcc-me').checked : false;
         
         const btn = document.getElementById('send-outreach-btn');
         btn.disabled = true;
@@ -2384,7 +2361,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         fetch(SHEET_URL, {
             method: 'POST',
-            body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company })
+            body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company, bcc: bccMe ? currentUser.email : '' })
         })
         .then(res => res.json())
         .then(data => {
