@@ -602,7 +602,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (field === 'status') triageDetails[uId].status = val;
                             
                             // Track if CSM was explicitly set (even to Unassigned) to differentiate from default Unassigned
-                            if (field === 'csm') triageDetails[uId].csmExplicitlySet = true;
+                            if (field === 'csm') {
+                                triageDetails[uId].csmExplicitlySet = true;
+                                triageDetails[uId].dbCsmSynced = true; // Already in DB, no need to re-sync
+                            }
                             
                             triageDetails[uId].history.push({
                                 status: triageDetails[uId].status,
@@ -1093,8 +1096,51 @@ document.addEventListener('DOMContentLoaded', () => {
             triageState.blackoutCsm = scopedCsm;
         }
 
+        // --- POST-LOGIN SYNC: Persist any unsaved Round-Robin CSM assignments ---
+        if (isLoggedIn) {
+            syncUnsavedCsmAssignments();
+        }
+
         renderTriageList();
         renderBlackoutList();
+    }
+
+    // Scans all Engagement Blackout customers and persists any CSM assignments
+    // that were only held in-memory (i.e., assigned by Round-Robin before login).
+    async function syncUnsavedCsmAssignments() {
+        if (!engagementBlackoutCustomers || engagementBlackoutCustomers.length === 0) return;
+
+        let syncCount = 0;
+        for (const item of engagementBlackoutCustomers) {
+            const uid = item.uniqueId;
+            const td = triageDetails[uid];
+            if (!td) continue;
+
+            // If CSM is assigned in memory but was never explicitly saved to DB
+            if (td.assignedCsm && td.assignedCsm !== 'Unassigned' && !td.dbCsmSynced) {
+                try {
+                    await fetch(SHEET_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            uniqueId: uid,
+                            company: item.company,
+                            field: 'csm',
+                            value: td.assignedCsm,
+                            user: 'System (Post-Login Sync)',
+                            email: currentUser.email,
+                            note: ''
+                        })
+                    });
+                    td.dbCsmSynced = true;
+                    syncCount++;
+                } catch (e) {
+                    console.error(`Failed to sync CSM for ${item.company}`, e);
+                }
+            }
+        }
+        if (syncCount > 0) {
+            console.log(`✅ [Post-Login Sync] Persisted ${syncCount} Round-Robin CSM assignments to DB.`);
+        }
     }
 
     const triageState = {
