@@ -699,8 +699,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 let assignedCsm = 'Unassigned';
                 let status = 'New Response';
                 
-                // If we have some triage history, but CSM is still the default 'Unassigned' and was never explicitly assigned
-                const needsRoundRobin = !triageDetails[uniqueId] || (triageDetails[uniqueId].assignedCsm === 'Unassigned' && !triageDetails[uniqueId].csmExplicitlySet);
+                // If we have some triage history, but CSM is still the default 'Unassigned' and was never explicitly assigned, AND the status is still 'New Response'
+                const needsRoundRobin = !triageDetails[uniqueId] || (triageDetails[uniqueId].assignedCsm === 'Unassigned' && !triageDetails[uniqueId].csmExplicitlySet && triageDetails[uniqueId].status === 'New Response');
 
                 if (!needsRoundRobin) {
                     assignedCsm = triageDetails[uniqueId].assignedCsm;
@@ -1399,7 +1399,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let initialTouchpointTs = 0;
         let latestTouchpointTs = 0;
         let touchCount = 0;
-        const TOUCH_KEYWORDS = ['emailed', 'phone attempt', 'cadence', 'outreach sent', 'call logged', 'event logged', 'manually drafted email'];
+        const TOUCH_KEYWORDS = ['emailed', 'phone attempt', 'cadence', 'outreach sent', 'call logged', 'event logged', 'manually drafted email', 'followed up'];
 
         history.forEach(h => {
             const hTs = new Date(h.timestamp).getTime();
