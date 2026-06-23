@@ -1049,8 +1049,19 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 4b. Block out all tickets from @melissa.com (file notification tickets)
-  if (!isNoiseTicket && ticket.requester && ticket.requester.email && ticket.requester.email.toLowerCase().indexOf('@melissa.com') !== -1) {
-    isNoiseTicket = true;
+  if (!isNoiseTicket && ticket.requester_id) {
+    try {
+      var contactRes = UrlFetchApp.fetch('https://runnertech.freshdesk.com/api/v2/contacts/' + ticket.requester_id, fdOpts);
+      if (contactRes.getResponseCode() === 200) {
+        var contact = JSON.parse(contactRes.getContentText());
+        var email = (contact.email || '').toLowerCase();
+        if (email.indexOf('melissa.com') !== -1 || email.indexOf('melissadata.com') !== -1) {
+          isNoiseTicket = true;
+        }
+      }
+    } catch (e) {
+      Logger.log("Failed to fetch contact for ticket " + ticketId + ": " + e.message);
+    }
   }
   
   // 5. GeoPoints automated data-update notices — skip ONLY if it's a pure notification
@@ -1072,6 +1083,25 @@ function processTicket(ticketId, dryRun) {
   if (isNoiseTicket) {
     var skipMsg = "Ticket skipped due to noise filtering (Auto-reply/Admin alert).";
     logAiProcessing(ticketId, "skipped", skipMsg, dryRun, null);
+    
+    // Write a tag back to Freshdesk so we never evaluate this noise ticket again!
+    if (!dryRun) {
+      try {
+        var existingTags = ticket.tags || [];
+        if (existingTags.indexOf('ai:skipped-noise') === -1) {
+          existingTags.push('ai:skipped-noise');
+          UrlFetchApp.fetch(ticketUrl, {
+            'method': 'put',
+            'headers': { 'Authorization': fdOpts.headers.Authorization, 'Content-Type': 'application/json' },
+            'payload': JSON.stringify({ tags: existingTags }),
+            'muteHttpExceptions': true
+          });
+        }
+      } catch (e) {
+        Logger.log("Failed to tag noise ticket " + ticketId + ": " + e.message);
+      }
+    }
+    
     return { status: "skipped", message: skipMsg };
   }
   
