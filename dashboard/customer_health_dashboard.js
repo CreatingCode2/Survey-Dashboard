@@ -3193,7 +3193,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.processSingleTicket = function() {
-        const input = document.getElementById('single-ticket-input');
+        const input = document.getElementById('manual-ticket-id');
         if (!input || !input.value) { alert('Please enter a ticket ID.'); return; }
         const ticketId = input.value.trim();
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
