@@ -1541,12 +1541,16 @@ function batchProcessTickets(dryRun) {
   var jobFullyComplete = false; // true only when we exhaust all pages or hit limit cleanly
   
   var startTime = new Date().getTime();
-  // GAS execution limit is 6 min. Stop after 4.5 min to safely save state.
-  var MAX_EXECUTION_TIME_MS = 4.5 * 60 * 1000;
-
   while (true) {
     if (new Date().getTime() - startTime > MAX_EXECUTION_TIME_MS) {
-      Logger.log('Execution limit approaching, pausing batch. State saved — daily trigger will resume.');
+      Logger.log('Execution limit approaching, pausing batch. State saved - background trigger will resume.');
+      
+      // Chain the background trigger to resume exactly where we left off
+      try {
+        ScriptApp.newTrigger('batchProcessTicketsTrigger').timeBased().after(60 * 1000).create();
+      } catch (e) {
+        Logger.log('Failed to create continuation trigger: ' + e.message);
+      }
       break;
     }
     
@@ -1574,7 +1578,7 @@ function batchProcessTickets(dryRun) {
     if (tkts.length === 0) {
       props.setProperty('AI_Batch_Running', 'false');
       jobFullyComplete = true;
-      Logger.log('Batch fully complete — no more tickets found.');
+      Logger.log('Batch fully complete - no more tickets found.');
       break;
     }
     
@@ -1591,11 +1595,9 @@ function batchProcessTickets(dryRun) {
         continue;
       }
       
-      // 1. Skip excluded ticket types (Spam, Runner Internal — they are noise)
+      // 1. Skip excluded ticket types (Spam, Runner Internal - they are noise)
       if (EXCLUDED_TICKET_TYPES.indexOf(ticketType) !== -1) {
         skippedCount++;
-        Logger.log('Skipping ticket ' + ticketId + ' — excluded type: ' + ticketType);
-        logAiProcessing(ticketId, 'skipped', 'Excluded Type: ' + ticketType, dryRun, { proposed_subject: (tkts[i].subject || ''), summary: 'Ticket type is ' + ticketType });
         continue;
       }
       
@@ -1615,7 +1617,6 @@ function batchProcessTickets(dryRun) {
           subject.indexOf('tempo') !== -1 ||
           subject.indexOf('basecamp') !== -1) {
         skippedCount++;
-        logAiProcessing(ticketId, 'skipped', 'Noise Filter Match', dryRun, { proposed_subject: (tkts[i].subject || ''), summary: 'Subject matched noise exclusion filters' });
         continue;
       }
       
@@ -1649,8 +1650,8 @@ function batchProcessTickets(dryRun) {
         Logger.log('Error processing ticket ' + ticketId + ': ' + e.message);
       }
       
-      // ~4s gap between tickets to stay within Groq/Gemini rate limits
-      Utilities.sleep(4000);
+      // ~2s gap between tickets to stay within rate limits (reduced from 4s)
+      Utilities.sleep(2000);
     }
     
     page++;
@@ -1662,7 +1663,22 @@ function batchProcessTickets(dryRun) {
   // Record end time regardless of how we exited
   props.setProperty('AI_Batch_LastRunEnd', new Date().toISOString());
 
-  // Send completion email only when the job truly finishes (not just paused for time limit)
+  // Send completion email and clean up triggers only when the job truly finishes
+  if (jobFullyComplete) {
+    cleanupBatchTriggers();
+    sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dryRun);
+  }
+}
+
+function cleanupBatchTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'batchProcessTicketsTrigger' && 
+        triggers[i].getEventType() === ScriptApp.EventType.CLOCK) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+}
   if (jobFullyComplete) {
     sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dryRun);
   }
