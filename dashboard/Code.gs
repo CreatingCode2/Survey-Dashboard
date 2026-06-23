@@ -1679,10 +1679,6 @@ function cleanupBatchTriggers() {
     }
   }
 }
-  if (jobFullyComplete) {
-    sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dryRun);
-  }
-}
 
 // ─────────────────────────────────────────────────────────────
 // Manual single-ticket processor (used by process_single_ticket
