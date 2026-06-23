@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ----------------------------------------
 
     let rawResponses = [];
+    let unmatchedSurveys = [];
     let triageDetails = {};
     let charts = {};
     let customerMasterData = {}; // Store loaded CSV data
@@ -55,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dashboard: document.getElementById('view-dashboard'),
         triage: document.getElementById('view-triage'),
         data: document.getElementById('view-data'),
+        tickets: document.getElementById('view-tickets')
     };
 
     const INDUSTRIES = ['Finance', 'Healthcare', 'Retail', 'Manufacturing', 'Technology', 'Education'];
@@ -436,6 +438,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(fetchUrl);
             if (!response.ok) {
                 console.warn(`⚠️ [DEBUG] Could not load customer_data.csv (Status: ${response.status}), using defaults`);
+                // Show alert in UI
+                const dashboardContent = document.getElementById('dashboard-content');
+                if (dashboardContent) {
+                    const alertDiv = document.createElement('div');
+                    alertDiv.className = 'bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-3 rounded relative mb-4';
+                    alertDiv.innerHTML = '<strong>Warning:</strong> Could not load master customer data. Silent Accounts count may be 0. Ensure <code>python -m http.server 8080</code> is running.';
+                    dashboardContent.parentElement.insertBefore(alertDiv, dashboardContent);
+                }
                 return;
             }
 
@@ -513,6 +523,14 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`🔍 [DEBUG] Looking for suno.edu:`, customerMasterData['domain:suno.edu'] ? 'FOUND' : 'NOT FOUND');
         } catch (error) {
             console.error('❌ [DEBUG] Error loading customer master data:', error);
+            // Show alert in UI
+            const dashboardContent = document.getElementById('dashboard-content');
+            if (dashboardContent) {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4';
+                alertDiv.innerHTML = '<strong>Connection Error:</strong> Could not load customer master data (local Python server may not be running). Silent Accounts count will be 0. <br>Please run <code>python -m http.server 8080</code> in the Dashboard folder.';
+                dashboardContent.parentElement.insertBefore(alertDiv, dashboardContent);
+            }
         }
     }
 
@@ -600,6 +618,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             if (field === 'csm') triageDetails[uId].assignedCsm = val;
                             if (field === 'status') triageDetails[uId].status = val;
+                            if (field === 'snoozeUntil') triageDetails[uId].snoozeUntil = val;
                             
                             // Track if CSM was explicitly set (even to Unassigned) to differentiate from default Unassigned
                             if (field === 'csm') {
@@ -653,7 +672,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function calculateEngagementBlackout() {
         engagementBlackoutCustomers = [];
         
-        const surveyedCompanyNames = new Set(rawResponses.map(r => r.company.toLowerCase()));
+        const companyLatestSurvey = {};
+        rawResponses.forEach(r => {
+            const name = r.company.toLowerCase();
+            const date = new Date(r.date);
+            if (!isNaN(date)) {
+                if (!companyLatestSurvey[name] || date > companyLatestSurvey[name]) {
+                    companyLatestSurvey[name] = date;
+                }
+            }
+        });
         
         const uniqueMasterCompanies = {};
         for (const key in customerMasterData) {
@@ -675,8 +703,9 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const companyName in uniqueMasterCompanies) {
             const master = uniqueMasterCompanies[companyName];
             
-            if (surveyedCompanyNames.has(master.name.toLowerCase())) {
-                continue;
+            let daysSinceLastSurvey = Infinity;
+            if (companyLatestSurvey[master.name.toLowerCase()]) {
+                daysSinceLastSurvey = (now - companyLatestSurvey[master.name.toLowerCase()]) / (24 * 60 * 60 * 1000);
             }
             
             const fdEntry = freshdeskData.find(f => f.company.toLowerCase() === master.name.toLowerCase());
@@ -690,11 +719,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     lastTicketFormatted = ticketDate.toLocaleDateString();
                 }
             }
+
+            const daysSinceLastTouch = Math.min(daysSinceLastTicket, daysSinceLastSurvey);
             
-            if (daysSinceLastTicket > 90) {
+            if (daysSinceLastTouch > 90) {
                 let group = '';
-                if (daysSinceLastTicket === Infinity || daysSinceLastTicket > 365) group = '365+ Days / Never (Critical)';
-                else if (daysSinceLastTicket > 180) group = '180-365 Days (Risk)';
+                if (daysSinceLastTouch === Infinity || daysSinceLastTouch > 365) group = '365+ Days / Never (Critical)';
+                else if (daysSinceLastTouch > 180) group = '180-365 Days (Risk)';
                 else group = '90-180 Days (Warning)';
                 
                 let uniqueId = master.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
@@ -748,7 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     company: master.name,
                     industry: master.industry,
                     erp: master.erp,
-                    daysSinceLastTicket: daysSinceLastTicket === Infinity ? Infinity : Math.round(daysSinceLastTicket),
+                    daysSinceLastTicket: daysSinceLastTouch === Infinity ? Infinity : Math.round(daysSinceLastTouch),
                     lastTicketFormatted: lastTicketFormatted,
                     group: group,
                     assignedCsm: assignedCsm,
@@ -1069,13 +1100,25 @@ document.addEventListener('DOMContentLoaded', () => {
             loginBtn.disabled = true;
         }
 
-        // Only show Manage CSMs to admins
+        // Only show Manage CSMs and AI admin controls to admins
         if (manageCsmBtn) {
             manageCsmBtn.style.display = (isLoggedIn && currentUser.role === 'admin') ? '' : 'none';
         }
+        
+        const isAdmin = isLoggedIn && currentUser.role === 'admin';
+        
+        // Show AI admin controls if admin
+        const batchControls = document.getElementById('batch-admin-controls');
+        const manualTicketPanel = document.getElementById('manual-ticket-panel');
+        const retryBtn = document.getElementById('retry-ai-btn');
+        const readOnlyNotice = document.getElementById('batch-readonly-notice');
+        
+        if (batchControls) batchControls.classList.toggle('hidden', !isAdmin);
+        if (manualTicketPanel) manualTicketPanel.classList.toggle('hidden', !isAdmin);
+        if (retryBtn) retryBtn.classList.toggle('hidden', !isAdmin);
+        if (readOnlyNotice) readOnlyNotice.classList.toggle('hidden', isAdmin);
 
         // --- CSM SCOPING: auto-filter both tabs to the logged-in CSM's accounts ---
-        const isAdmin = isLoggedIn && currentUser.role === 'admin';
         const scopedCsm = (isLoggedIn && !isAdmin) ? currentUser.name : 'all';
 
         // Critical tab filter
@@ -1351,7 +1394,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    window.handleTriageUpdate = async (uniqueId, field, value, isBlackout = false, silent = false) => {
+    window.handleTriageUpdate = async (uniqueId, field, value, isBlackout = false, silent = false, customNote = "") => {
         if (!isLoggedIn) {
             return; // silently skip if not logged in during auto-updates
         }
@@ -1382,8 +1425,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (record) companyName = record.company;
         }
 
-        let note = "";
-        if (field === 'status' && !silent) {
+        let note = customNote;
+        if (field === 'status' && !silent && !customNote) {
             note = prompt(`Please enter a note explaining this status update for ${companyName} (Optional):`);
             if (note === null) return; // cancel update
         }
@@ -1543,26 +1586,36 @@ document.addEventListener('DOMContentLoaded', () => {
         dashboard: document.getElementById('nav-dashboard'),
         triage: document.getElementById('nav-triage'),
         data: document.getElementById('nav-data'),
+        tickets: document.getElementById('nav-tickets')
     };
 
     function navigateTo(viewName) {
+        // Authentication check for protected views
+        if ((viewName === 'tickets' || viewName === 'data') && (!currentUser || !currentUser.email)) {
+            alert('You must be logged in to view ' + (viewName === 'tickets' ? 'Ticket Intelligence' : 'the Data Table') + '.');
+            return;
+        }
+
         currentView = viewName;
 
         Object.keys(views).forEach(key => {
-            views[key].classList.toggle('hidden', key !== viewName);
-            navButtons[key].classList.toggle('active', key === viewName);
+            if (views[key]) views[key].classList.toggle('hidden', key !== viewName);
+            if (navButtons[key]) navButtons[key].classList.toggle('active', key === viewName);
         });
 
         if (viewName === 'triage' && rawResponses.length > 0) {
             renderTriageList();
         } else if (viewName === 'data' && rawResponses.length > 0) {
             updateDashboard();
+        } else if (viewName === 'tickets') {
+            if (typeof window.fetchAiData === 'function') window.fetchAiData();
         }
     }
 
     navButtons.dashboard.addEventListener('click', () => navigateTo('dashboard'));
     navButtons.triage.addEventListener('click', () => navigateTo('triage'));
     navButtons.data.addEventListener('click', () => navigateTo('data'));
+    if (navButtons.tickets) navButtons.tickets.addEventListener('click', () => navigateTo('tickets'));
 
     document.getElementById('tierFilter').addEventListener('change', (e) => {
         state.industry = e.target.value;
@@ -2173,6 +2226,36 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    
+    function renderUnmatchedSurveys() {
+        const container = document.getElementById('unmatched-surveys-container');
+        if (!container) return;
+        
+        container.innerHTML = '';
+        if (unmatchedSurveys.length === 0) {
+            container.innerHTML = '<p class="text-sm text-gray-500 italic px-2 py-1">All surveys matched successfully!</p>';
+            return;
+        }
+        
+        unmatchedSurveys.forEach(survey => {
+            const div = document.createElement('div');
+            div.className = 'flex justify-between items-center text-sm py-2 px-3 hover:bg-gray-50 rounded';
+            
+            // Format date nicely
+            const dateObj = new Date(survey.date);
+            const dateStr = !isNaN(dateObj) ? dateObj.toLocaleDateString() : survey.date;
+
+            div.innerHTML = `
+                <div class="flex flex-col">
+                    <span class="font-medium text-gray-800">${survey.name}</span>
+                    <span class="text-xs text-gray-500">${survey.email}</span>
+                </div>
+                <div class="text-xs text-gray-400">${dateStr}</div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
     function updateDashboard() {
         if (rawResponses.length === 0) {
             return;
@@ -2204,7 +2287,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const blackoutRiskFilter = document.getElementById('blackoutRiskFilter');
     if (blackoutRiskFilter) {
         blackoutRiskFilter.addEventListener('change', function(e) {
             triageState.blackoutRisk = e.target.value;
@@ -2212,6 +2294,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const blackoutCsmFilter = document.getElementById('blackoutCsmFilter');
     if (blackoutCsmFilter) {
         blackoutCsmFilter.addEventListener('change', function(e) {
             triageState.blackoutCsm = e.target.value;
@@ -2278,8 +2361,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("Please provide both a date and a reason for snoozing.");
             return;
         }
-        const historyText = `Snoozed until ${date}: ${note.trim()}`;
-        handleTriageUpdate(uniqueId, 'history', historyText, true);
+        handleTriageUpdate(uniqueId, 'snoozeUntil', date, true, true, note);
         closeSnoozeModal();
         alert("Account snoozed successfully! It will disappear on the next refresh.");
         setTimeout(() => location.reload(), 1500);
@@ -2560,4 +2642,592 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.textContent = 'Save to Freshdesk';
         });
     }
-});
+
+
+    // ── Ticket Intelligence AI instance trackers ─────────────────────────────
+    let aiIssueChartInstance       = null;
+    let aiIntegrationChartInstance = null;
+    let aiProductChartInstance     = null;
+    let aiPollingInterval          = null;
+
+    // ── Ticket_AI_Data column indices (from writeTicketAiData in Code.gs) ─────
+    // 0:ticket_id  1:company_id  2:created_at  3:processed_at  4:subject_original
+    // 5:proposed_subject  6:summary  7:issue_type  8:integration  9:product_area
+    // 10:platform  11:severity  12:resolution  13:sentiment  14:status  15:tags
+
+    function normaliseIntegration(raw) {
+        if (!raw || raw === '') return null;
+
+        let key = raw.toLowerCase().trim();
+
+        if (key.startsWith('des -') || key === 'data enhancement services (des)' || key === 'data enhancement services' || key === 'des') {
+            return 'Data Enhancement Services (DES)';
+        }
+        
+        // If the AI outputs 'PeopleSoft - HCM', we want the base ERP for the top-level chart
+        if (key.includes('-')) {
+            key = key.split('-')[0].trim();
+        }
+
+        // Exclude internal/partner systems and add-ons (these go to Product chart instead)
+        const EXCLUDE = ['general', 'none', 'melissa', 'ncoa', 'ftp', 'sftp', 'n/a', 'unknown', 'other'];
+        if (EXCLUDE.includes(key)) return null;
+
+        const MAP = {
+            'banner':           'Banner',
+            'peoplesoft':       'PeopleSoft',
+            'peoplesoft enterprise': 'PeopleSoft',
+            'ps campus solutions':   'PS Campus Solutions',
+            'colleague':        'Colleague',
+            'jd edwards':       'JD Edwards',
+            'jdedwards':        'JD Edwards',
+            'oracle ebs':       'Oracle EBS',
+            'oracle e-business suite': 'Oracle EBS',
+            'oracle database':  'Oracle Database',
+            'oracle':           'Oracle Database', // Usually maps to DB unless it says EBS
+            'advance':          'Advance',
+            'salesforce':       'Salesforce',
+            'dynamics':         'MS Dynamics',
+            'ms dynamics':      'MS Dynamics',
+            'workday':          'Workday',
+            'api':              'API',
+            'webhook':          'Webhook',
+            'clean_update':     'CLEAN_Update',
+            'clean_file':       'CLEAN_File',
+            'sso':              'SSO',
+            'ldap':             'LDAP',
+            'azure':            'Azure AD',
+            'saml':             'SAML',
+        };
+        return MAP[key] || raw.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+
+    // Normalise product_area slug → display name for Services/Products chart
+    function normaliseProduct(raw) {
+        if (!raw || raw === '') return null;
+        const key = raw.toLowerCase().trim();
+        const EXCLUDE = ['general', 'none', 'unknown', 'other', 'authentication'];
+        if (EXCLUDE.includes(key)) return null;
+
+        const MAP = {
+            'clean_address':             'CLEAN_Address',
+            'clean address':             'CLEAN_Address',
+            'clean-address':             'CLEAN_Address',
+            'clean-address-services':    'CLEAN_Address',
+            'clean_cloud':               'CLEAN_Cloud',
+            'clean_data portal':         'CLEAN_Data Portal',
+            'clean_entry':               'CLEAN_Entry',
+            'clean_file':                'CLEAN_File',
+            'clean_update':              'CLEAN_Update',
+            'data enhancement services': 'Data Enhancement Services',
+            'des':                       'Data Enhancement Services',
+            'surveydig':                 'SurveyDIG',
+            'surveydIG':                 'SurveyDIG',
+            'onboarding':                'On boarding',
+            'on boarding':               'On boarding',
+            'documentation':             'Documentation',
+        };
+        return MAP[key] || raw;
+    }
+
+    // ── Main AI data fetch function ───────────────────────────────────────────
+    window.fetchAiData = async function() {
+        // ── 1. FETCH AI PROCESSING LOG ────────────────────────────────────────
+        // Expected header: timestamp,ticket_id,action,status,error_message,dry_run,proposed_subject,summary
+        try {
+            const logRes   = await fetch(`${SHEET_URL}?type=ai_log`);
+            const logCsv   = await logRes.text();
+            const logLines = logCsv.trim().split('\n');
+            const tbody    = document.getElementById('ai-log-table-body');
+            if (tbody) {
+                tbody.innerHTML = '';
+
+                const logHeader = parseCSVLine(logLines[0] || '');
+                const logHeaderValid = logHeader[0] === 'timestamp' && logHeader[1] === 'ticket_id';
+
+                if (!logHeaderValid || logLines.length <= 1) {
+                    const reason = !logHeaderValid
+                        ? 'AI_Processing_Log sheet is not yet created — run a batch job first.'
+                        : 'No log entries found.';
+                    tbody.innerHTML = `<tr><td colspan="6" class="px-3 py-4 text-center text-amber-600 font-medium">⚠️ ${reason}</td></tr>`;
+                } else {
+                    window.allAiLogs = [];
+                    for (let i = 1; i < logLines.length; i++) {
+                        const parts = parseCSVLine(logLines[i]);
+                        if (parts.length >= 4 && parts[0]) {
+                            window.allAiLogs.push({
+                                timestamp:        parts[0],
+                                ticket_id:        parts[1],
+                                action:           parts[2],
+                                status:           parts[3],
+                                dry_run:          parts[5] || 'FALSE',
+                                proposed_subject: parts[6] || '',
+                                summary:          parts[7] || ''
+                            });
+                        }
+                    }
+
+                    window.allAiLogs.reverse();
+                    
+                    if (!window.renderAiLogTable) {
+                        window.renderAiLogTable = function() {
+                            const tbody = document.getElementById('ai-log-table-body');
+                            if (!tbody) return;
+                            
+                            const filterEl = document.getElementById('ai-log-filter');
+                            const filterVal = filterEl ? filterEl.value : 'all';
+                            let filtered = window.allAiLogs;
+                            
+                            if (filterVal !== 'all') {
+                                filtered = window.allAiLogs.filter(log => {
+                                    if (filterVal === 'error') return log.status !== 'success' && log.status !== 'skipped';
+                                    return log.status === filterVal;
+                                });
+                            }
+                            
+                            tbody.innerHTML = '';
+                            if (filtered.length === 0) {
+                                tbody.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">No matching log entries found.</td></tr>';
+                                return;
+                            }
+                            
+                            filtered.slice(0, 300).forEach(log => {
+                                const statusColor  = log.status === 'success' ? 'text-green-600' : (log.status === 'skipped' ? 'text-yellow-600' : 'text-red-600');
+                                const fdUrl        = `https://runnertech.freshdesk.com/a/tickets/${log.ticket_id}`;
+                                const modeBadge    = log.dry_run === 'TRUE' ? '<span class="text-xs text-yellow-600 font-semibold">(Dry Run)</span>' : '';
+                                const subjectCell  = log.proposed_subject
+                                    ? `<span class="text-xs text-indigo-700">${log.proposed_subject}</span>`
+                                    : '<span class="text-xs text-gray-400">—</span>';
+                                const summaryCell  = log.summary
+                                    ? `<span class="text-xs text-gray-600 line-clamp-2" title="${log.summary.replace(/"/g,"'")}">${log.summary.substring(0,120)}${log.summary.length > 120 ? '…' : ''}</span>`
+                                    : '<span class="text-xs text-gray-400">—</span>';
+                                tbody.innerHTML += `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-3 py-2 whitespace-nowrap text-gray-500">${new Date(log.timestamp).toLocaleString()}</td>
+                                        <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
+                                            <a href="${fdUrl}" target="_blank" class="hover:underline">#${log.ticket_id}</a>
+                                        </td>
+                                        <td class="px-3 py-2 whitespace-nowrap">${modeBadge}</td>
+                                        <td class="px-3 py-2 whitespace-nowrap ${statusColor} font-semibold text-xs">${log.status}</td>
+                                        <td class="px-3 py-2 max-w-xs">${subjectCell}</td>
+                                        <td class="px-3 py-2 max-w-sm">${summaryCell}</td>
+                                    </tr>
+                                `;
+                            });
+                        };
+                    }
+                    window.renderAiLogTable();
+                }
+            }
+        } catch(e) { console.warn('AI Logs fetch failed', e); }
+
+        // ── 2. FETCH TICKET TRENDS (Ticket_AI_Data sheet) ────────────────────
+        // Expected header: ticket_id,company_id,created_at,processed_at,
+        //   subject_original,proposed_subject,summary,issue_type,integration,product_area,...
+        try {
+            const trendRes    = await fetch(`${SHEET_URL}?type=ticket_trends`);
+            const trendCsv    = await trendRes.text();
+            const trendLines  = trendCsv.trim().split('\n');
+
+            const trendHeader = parseCSVLine(trendLines[0] || '');
+            const trendHeaderValid = trendHeader[0] === 'ticket_id' && trendHeader[5] === 'proposed_subject';
+
+            if (!trendHeaderValid) {
+                console.warn('⚠️ ticket_trends returned unexpected sheet. Header col[0]:', trendHeader[0]);
+                window.renderAiCharts([], 'Ticket_AI_Data sheet is not yet created. Run a batch job first to populate trend data.');
+            } else {
+                const trendData = [];
+                for (let i = 1; i < trendLines.length; i++) {
+                    const p = parseCSVLine(trendLines[i]);
+                    if (!p[0]) continue;
+                    trendData.push({
+                        ticket_id:        p[0],
+                        company_id:       p[1],
+                        date:             p[2],  // created_at
+                        processed_at:     p[3],  // processed_at
+                        proposed_subject: p[5],
+                        summary:          p[6],
+                        issue_type:       p[7],
+                        integration:      p[8],
+                        product_area:     p[9],
+                        platform:         p[10],
+                        severity:         p[11],
+                        resolution:       p[12],
+                        sentiment:        p[13],
+                        status:           p[14],
+                        tags:             p[15]
+                    });
+                }
+                window.renderAiCharts(trendData, null);
+                window.renderTicketBrowser(trendData);
+            }
+        } catch(e) {
+            console.error('Error fetching AI Ticket Trends:', e);
+            window.renderAiCharts([], 'Error loading trend data: ' + e.message);
+        }
+    };
+
+    // ── Render the three AI charts ────────────────────────────────────────────
+    window.renderAiCharts = function(data, errorMsg) {
+        if (aiIssueChartInstance)       { aiIssueChartInstance.destroy();       aiIssueChartInstance = null; }
+        if (aiIntegrationChartInstance) { aiIntegrationChartInstance.destroy(); aiIntegrationChartInstance = null; }
+        if (aiProductChartInstance)     { aiProductChartInstance.destroy();     aiProductChartInstance = null; }
+
+        window.CHART_PALETTE = [
+            '#6366f1','#10b981','#f59e0b','#3b82f6','#ec4899',
+            '#8b5cf6','#14b8a6','#f97316','#06b6d4','#a855f7',
+            '#84cc16','#ef4444','#0ea5e9','#d946ef','#22c55e'
+        ];
+        const PALETTE = window.CHART_PALETTE;
+
+        // Show error / empty state
+        if (errorMsg || !data || data.length === 0) {
+            const msg = errorMsg || 'No AI trend data yet. Run a batch job to generate data.';
+            ['aiIssueTypeChart', 'aiIntegrationChart', 'aiProductChart'].forEach(id => {
+                const canvas = document.getElementById(id);
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.font = '13px Inter, sans-serif';
+                ctx.fillStyle = '#9ca3af';
+                ctx.textAlign = 'center';
+                ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
+            });
+            return;
+        }
+
+        // ── Count Issue Types ─────────────────────────────────────────────────
+        const issueCounts = {};
+        data.forEach(r => {
+            if (!r.issue_type) return;
+            const label = r.issue_type.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            issueCounts[label] = (issueCounts[label] || 0) + 1;
+        });
+        const sortedIssue = Object.entries(issueCounts).sort((a,b) => b[1] - a[1]).slice(0, 12);
+
+        const issueCtx = document.getElementById('aiIssueTypeChart');
+        if (issueCtx) {
+            aiIssueChartInstance = new Chart(issueCtx.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: sortedIssue.map(i => i[0]),
+                    datasets: [{
+                        label: 'Tickets',
+                        data: sortedIssue.map(i => i[1]),
+                        backgroundColor: PALETTE.slice(0, sortedIssue.length),
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { maxRotation: 35, minRotation: 20, font: { size: 11 } } },
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    }
+                }
+            });
+        }
+
+        // ── Count ERP / Integrations & DES (Drill-down logic) ─────────────────
+        window.cachedErpIntgCounts = {};
+        window.cachedDesCounts = {};
+        window.cachedSubCounts = {};
+        
+        data.forEach(r => {
+            const raw = (r.integration || '').trim();
+            const norm = normaliseIntegration(raw);
+            if (!norm) return;
+            
+            window.cachedErpIntgCounts[norm] = (window.cachedErpIntgCounts[norm] || 0) + 1;
+            
+            if (norm === 'Data Enhancement Services (DES)') {
+                let sub = raw.replace(/^des\s*-\s*/i, '').trim();
+                if (!sub || sub.toLowerCase() === 'des') sub = 'Other DES';
+                sub = sub.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                window.cachedDesCounts[sub] = (window.cachedDesCounts[sub] || 0) + 1;
+            } else {
+                if (!window.cachedSubCounts[norm]) window.cachedSubCounts[norm] = {};
+                if (raw.includes('-')) {
+                    let sub = raw.split('-').slice(1).join('-').trim();
+                    if (!sub) sub = 'Base / Core';
+                    window.cachedSubCounts[norm][sub] = (window.cachedSubCounts[norm][sub] || 0) + 1;
+                } else {
+                    window.cachedSubCounts[norm]['Base / Core'] = (window.cachedSubCounts[norm]['Base / Core'] || 0) + 1;
+                }
+            }
+        });
+
+        window.renderIntegrationChart = function(level = 'top') {
+            if (aiIntegrationChartInstance) { aiIntegrationChartInstance.destroy(); aiIntegrationChartInstance = null; }
+            
+            const intgCtx = document.getElementById('aiIntegrationChart');
+            const backBtn = document.getElementById('ai-integration-back-btn');
+            if (!intgCtx) return;
+            
+            let dataMap = {};
+            if (level === 'top') dataMap = window.cachedErpIntgCounts;
+            else if (level === 'des') dataMap = window.cachedDesCounts;
+            else dataMap = window.cachedSubCounts[level] || {};
+            
+            const sortedIntg = Object.entries(dataMap).sort((a,b) => b[1] - a[1]);
+            
+            if (backBtn) {
+                backBtn.classList.toggle('hidden', level === 'top');
+            }
+
+            if (sortedIntg.length === 0) {
+                const ctx = intgCtx.getContext('2d');
+                ctx.clearRect(0, 0, intgCtx.width, intgCtx.height);
+                ctx.font = '13px Inter, sans-serif';
+                ctx.fillStyle = '#9ca3af';
+                ctx.textAlign = 'center';
+                ctx.fillText(level === 'top' ? 'No ERP/Integration data yet.' : 'No sub-module data available.', intgCtx.width / 2, intgCtx.height / 2);
+                return;
+            }
+
+            aiIntegrationChartInstance = new Chart(intgCtx.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: sortedIntg.map(i => i[0]),
+                    datasets: [{
+                        data: sortedIntg.map(i => i[1]),
+                        backgroundColor: window.CHART_PALETTE.slice(0, sortedIntg.length)
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { font: { size: 12 } } } },
+                    onClick: (event, elements, chart) => {
+                        if (level === 'top' && elements.length > 0) {
+                            const idx = elements[0].index;
+                            const label = chart.data.labels[idx];
+                            if (label === 'Data Enhancement Services (DES)') {
+                                window.renderIntegrationChart('des');
+                            } else if (window.cachedSubCounts[label] && Object.keys(window.cachedSubCounts[label]).length > 0) {
+                                // Drill down into ERP modules
+                                window.renderIntegrationChart(label);
+                            }
+                        }
+                    }
+                }
+            });
+        };
+
+        window.renderIntegrationChart('top');
+
+        // ── Count Services / Products ─────────────────────────────────────────
+        const prodCounts = {};
+        data.forEach(r => {
+            const norm = normaliseProduct(r.product_area);
+            if (!norm) return;
+            prodCounts[norm] = (prodCounts[norm] || 0) + 1;
+        });
+        const sortedProd = Object.entries(prodCounts).sort((a,b) => b[1] - a[1]).slice(0, 12);
+
+        const prodCtx = document.getElementById('aiProductChart');
+        if (prodCtx) {
+            aiProductChartInstance = new Chart(prodCtx.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: sortedProd.map(i => i[0]),
+                    datasets: [{
+                        label: 'Tickets',
+                        data: sortedProd.map(i => i[1]),
+                        backgroundColor: PALETTE.slice(0, sortedProd.length),
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { maxRotation: 35, minRotation: 20, font: { size: 11 } } },
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    }
+                }
+            });
+        }
+    };
+
+    // ── Render the ticket browser table ───────────────────────────────────────
+    window.renderTicketBrowser = function(data) {
+        const container = document.getElementById('ai-ticket-browser-body');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!data || data.length === 0) {
+            container.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">No tickets processed yet.</td></tr>';
+            return;
+        }
+
+        const SEVERITY_COLORS = {
+            critical: 'bg-red-100 text-red-700',
+            high:     'bg-orange-100 text-orange-700',
+            medium:   'bg-yellow-100 text-yellow-700',
+            low:      'bg-green-100 text-green-700'
+        };
+
+        const SENTIMENT_ICONS = {
+            frustrated:              '😡',
+            'frustrated-then-resolved': '😤→😊',
+            positive:                '😊',
+            neutral:                 '😐'
+        };
+
+        // Sort newest first by processed date, fallback to created date
+        const sorted = [...data].sort((a,b) => {
+            const dateA = a.processed_at ? new Date(a.processed_at) : new Date(a.date);
+            const dateB = b.processed_at ? new Date(b.processed_at) : new Date(b.date);
+            return dateB - dateA;
+        });
+
+        sorted.forEach(r => {
+            const fdUrl    = `https://runnertech.freshdesk.com/a/tickets/${r.ticket_id}`;
+            const sevColor = SEVERITY_COLORS[r.severity] || 'bg-gray-100 text-gray-700';
+            const sentIcon = SENTIMENT_ICONS[r.sentiment] || '😐';
+            const intg     = normaliseIntegration(r.integration);
+            const prod     = normaliseProduct(r.product_area) || r.product_area || '—';
+            const label    = intg ? `${prod} / ${intg}` : prod;
+            const displayDate = r.processed_at ? new Date(r.processed_at).toLocaleDateString() : (r.date ? new Date(r.date).toLocaleDateString() : '—');
+
+            container.innerHTML += `
+                <tr class="hover:bg-gray-50 cursor-pointer" onclick="window.open('${fdUrl}','_blank')" title="${(r.summary||'').replace(/"/g,"'")}">
+                    <td class="px-3 py-2 whitespace-nowrap text-gray-500">${displayDate}</td>
+                    <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
+                        <a href="${fdUrl}" target="_blank" class="hover:underline">#${r.ticket_id}</a>
+                    </td>
+                    <td class="px-3 py-2 max-w-xs truncate">${r.proposed_subject || r.subject_original || '—'}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm">${label}</td>
+                    <td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-xs font-semibold ${sevColor}">${r.severity || '—'}</span></td>
+                    <td class="px-3 py-2 text-center">${sentIcon}</td>
+                </tr>
+            `;
+        });
+    };
+
+    // ── Batch job controls ────────────────────────────────────────────────────
+    window.startAiBatch = function() {
+        if (!isLoggedIn) {
+            alert('You must be logged in to run a batch job. Batch jobs are logged by user.');
+            promptLogin();
+            return;
+        }
+
+        const btnStart       = document.getElementById('start-ai-batch-btn');
+        const btnStop        = document.getElementById('stop-ai-batch-btn');
+        const statusContainer = document.getElementById('ai-status-container');
+        const statusText     = document.getElementById('ai-status-text');
+        const dryRun         = document.getElementById('ai-dry-run') && document.getElementById('ai-dry-run').checked;
+        const limitInput     = document.getElementById('ai-batch-limit');
+        const limit          = limitInput ? parseInt(limitInput.value, 10) || 0 : 0;
+
+        btnStart.disabled = true;
+        btnStart.textContent = 'Starting...';
+
+        const modeLabel  = dryRun ? '📝 Dry-Run Audit (no writes to Freshdesk)' : '⚡ Live Run (WILL write to Freshdesk)';
+        const limitLabel = limit > 0 ? ` (Limit: ${limit} tickets)` : '';
+        if (statusText) statusText.textContent = `Batch job running — ${modeLabel}${limitLabel}...`;
+
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'start_batch_ai',
+                dryRun: dryRun,
+                limit: limit,
+                triggeredBy: currentUser.name,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => { console.log(`✅ Batch trigger acknowledged (${modeLabel}):`, data); })
+        .catch(err => { console.warn('Batch start fetch timed out (GAS may still be running):', err.message); });
+
+        if (btnStart)  btnStart.classList.add('hidden');
+        if (btnStop)   btnStop.classList.remove('hidden');
+        if (statusContainer) statusContainer.classList.remove('hidden');
+        pollAiBatchStatus();
+    };
+
+    window.stopAiBatch = function() {
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'stop_batch_ai' })
+        }).catch(err => console.warn('Stop batch signal failed (may have already finished):', err));
+
+        if (aiPollingInterval) clearInterval(aiPollingInterval);
+        const btnStart       = document.getElementById('start-ai-batch-btn');
+        const btnStop        = document.getElementById('stop-ai-batch-btn');
+        const statusContainer = document.getElementById('ai-status-container');
+        if (btnStart)  { btnStart.classList.remove('hidden'); btnStart.disabled = false; btnStart.textContent = '▶️ Start Batch Job'; }
+        if (btnStop)   btnStop.classList.add('hidden');
+        if (statusContainer) statusContainer.classList.add('hidden');
+    };
+
+    function pollAiBatchStatus() {
+        if (aiPollingInterval) clearInterval(aiPollingInterval);
+
+        aiPollingInterval = setInterval(() => {
+            fetch(`${SHEET_URL}?type=ai_status`)
+            .then(res => res.json())
+            .then(data => {
+                const statusText     = document.getElementById('ai-status-text');
+                const statusProgress = document.getElementById('ai-status-progress');
+
+                const batchInfo = data.message || data;
+
+                if (batchInfo.running) {
+                    if (statusText)     statusText.textContent     = 'Batch job running (Page ' + (batchInfo.page || 1) + ')...';
+                    if (statusProgress) statusProgress.textContent = (batchInfo.ticketsProcessed || 0) + ' processed';
+                } else {
+                    clearInterval(aiPollingInterval);
+                    window.stopAiBatch();
+                    window.fetchAiData(); // Refresh logs and charts
+                }
+            })
+            .catch(err => { console.error('Error polling AI status:', err); });
+        }, 5000);
+    }
+
+    window.processSingleTicket = function() {
+        const input = document.getElementById('single-ticket-input');
+        if (!input || !input.value) { alert('Please enter a ticket ID.'); return; }
+        const ticketId = input.value.trim();
+        if (!isLoggedIn) { alert('You must be logged in.'); return; }
+
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'process_single_ticket',
+                ticketId: ticketId,
+                triggeredBy: currentUser.name,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            alert(data.status === 'success' ? `✅ Ticket #${ticketId} processed successfully.` : `❌ Error: ${data.message}`);
+            window.fetchAiData();
+        })
+        .catch(err => { alert('Error: ' + err.message); });
+    };
+
+    window.retryFailedTickets = function() {
+        if (!isLoggedIn) { alert('You must be logged in.'); return; }
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'retry_failed',
+                triggeredBy: currentUser.name,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => { alert(data.message || 'Retry job started.'); pollAiBatchStatus(); })
+        .catch(err => { alert('Error: ' + err.message); });
+    };
+
+}); // END DOMContentLoaded

@@ -49,6 +49,8 @@
                     <button id="nav-data"
                         class="nav-button px-4 py-2 text-sm font-semibold rounded-md w-full md:w-auto">Data
                         Table</button>
+                    <button id="nav-tickets"
+                        class="nav-button px-4 py-2 text-sm font-semibold rounded-md w-full md:w-auto">🎫 Ticket Intelligence</button>
                 </nav>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
                     <div class="w-full">
@@ -411,6 +413,232 @@
                 </div>
             </section>
 
+            <section id="view-tickets" class="hidden">
+                <!-- ── Ticket Intelligence header ───────────────────────────── -->
+                <div class="bg-indigo-50 border-l-4 border-indigo-400 p-4 mb-4 rounded-r-lg">
+                    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
+                        <div class="flex">
+                            <div class="flex-shrink-0"><span class="text-xl">🤖</span></div>
+                            <div class="ml-3">
+                                <h3 class="text-indigo-800 font-bold">Ticket Intelligence (AI)</h3>
+                                <p class="text-sm text-indigo-700">Run AI batch processing over closed tickets to generate revised subject lines, summaries, and trend charts.</p>
+                            </div>
+                        </div>
+
+                        <!-- Admin-only batch controls -->
+                        <div id="batch-admin-controls" class="hidden flex-col sm:flex-row gap-3 items-end sm:items-center">
+                            <div class="flex flex-col gap-2">
+                                <label class="inline-flex items-center" title="Dry-Run = preview only. Nothing is saved to Freshdesk until you uncheck this.">
+                                    <input type="checkbox" id="ai-dry-run" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked>
+                                    <span class="ml-2 text-sm text-gray-700 font-bold">📝 Dry-Run (Preview only)</span>
+                                </label>
+                                <div class="flex items-center gap-2">
+                                    <label for="ai-batch-limit" class="text-sm text-gray-700 font-medium">Max tickets:</label>
+                                    <input type="number" id="ai-batch-limit" placeholder="All" min="1" max="10000"
+                                        title="Leave blank to process all eligible tickets. Enter a number (e.g. 20) to stop after that many."
+                                        class="w-20 rounded border-gray-300 px-2 py-1 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 ml-2">
+                                <button id="start-ai-batch-btn" onclick="startAiBatch()"
+                                    class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition shadow-md text-sm">
+                                    ▶️ Start Batch Job
+                                </button>
+                                <button id="stop-ai-batch-btn" onclick="stopAiBatch()"
+                                    class="hidden px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition shadow-md text-sm">
+                                    ⏹️ Stop Job
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Non-admin read-only notice -->
+                        <div id="batch-readonly-notice" class="hidden">
+                            <span class="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 border border-gray-200 rounded-lg text-xs text-gray-600 font-medium">
+                                🔒 Batch jobs are restricted to system admins.<br>Contact Misty Wilmore to request a run.
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Enhanced status bar ─────────────────────────────────── -->
+                <div id="ai-status-container" class="hidden bg-white rounded-lg border border-indigo-200 p-4 mb-4 shadow-sm">
+                    <div class="flex flex-wrap justify-between items-center text-sm mb-2 gap-2">
+                        <span class="font-semibold text-indigo-800" id="ai-status-text">Batch job running...</span>
+                        <div class="flex items-center gap-4 text-xs">
+                            <span class="text-green-600 font-semibold" id="ai-status-progress">✅ 0 processed</span>
+                            <span class="text-red-500 font-semibold" id="ai-status-failed">❌ 0 failed</span>
+                            <span class="text-gray-400" id="ai-status-skipped">⏭ 0 skipped</span>
+                            <span class="text-gray-400" id="ai-status-elapsed">0s elapsed</span>
+                        </div>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div class="bg-indigo-600 h-2 rounded-full w-full animate-pulse"></div>
+                    </div>
+                </div>
+
+                <!-- ── Manual Ticket Processing panel (admin-only) ─────────── -->
+                <div id="manual-ticket-panel" class="hidden bg-white rounded-xl shadow-sm border border-amber-200 p-4 mb-6">
+                    <div class="flex flex-wrap items-start gap-6">
+                        <div>
+                            <h3 class="text-sm font-bold text-gray-800 mb-1">🎯 Manual Ticket Processing</h3>
+                            <p class="text-xs text-gray-500 mb-3">Process a single ticket on-demand, or retry all failures from the log.</p>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <div class="flex items-center gap-2">
+                                    <label for="manual-ticket-id" class="text-sm text-gray-700 font-medium whitespace-nowrap">Ticket ID:</label>
+                                    <input type="number" id="manual-ticket-id" placeholder="e.g. 91003" min="1"
+                                        class="w-32 rounded border-gray-300 px-2 py-1.5 text-sm shadow-sm focus:border-amber-400 focus:ring-amber-400">
+                                </div>
+                                <label class="inline-flex items-center gap-2 cursor-pointer" title="Bypasses the 'already processed' check — use this to re-run the AI on a ticket that already has a summary.">
+                                    <input type="checkbox" id="manual-force-reprocess" class="rounded border-gray-300 text-amber-500 focus:ring-amber-400">
+                                    <span class="text-xs font-semibold text-amber-700">Force Re-process</span>
+                                </label>
+                                <button id="manual-process-btn" onclick="processSingleTicket()"
+                                    class="px-3 py-1.5 bg-amber-500 text-white font-semibold rounded-lg hover:bg-amber-600 transition text-sm shadow-sm">
+                                    ▶ Process This Ticket
+                                </button>
+                                <button id="retry-failed-btn" onclick="retryFailedTickets()"
+                                    class="px-3 py-1.5 bg-red-100 text-red-700 font-semibold rounded-lg hover:bg-red-200 border border-red-300 transition text-sm shadow-sm"
+                                    title="Re-queues every ticket that shows as 'error' in the AI Processing Log below.">
+                                    ⚠️ Retry Failed Tickets
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="manual-ticket-result" class="mt-3 text-sm hidden"></div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                    <div class="chart-card">
+                        <h2 class="text-lg font-semibold mb-1">Issue Types by Category</h2>
+                        <p class="text-sm text-gray-500 mb-4">Grouped by Revised Subject prefix</p>
+                        <div class="chart-container flex-grow" style="height: 300px;">
+                            <canvas id="aiIssueTypeChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card relative">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-lg font-semibold mb-1">ERP / Integrations</h2>
+                            <button id="ai-integration-back-btn" class="hidden text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center" onclick="window.renderIntegrationChart('top')">
+                                &larr; Back
+                            </button>
+                        </div>
+                        <p class="text-sm text-gray-500 mb-4">Customer core systems (FTP excluded)</p>
+                        <div class="chart-container flex-grow" style="height: 300px;">
+                            <canvas id="aiIntegrationChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2 class="text-lg font-semibold mb-1">Services / Products</h2>
+                        <p class="text-sm text-gray-500 mb-4">Add-ons like SFTP and Data Enhancement</p>
+                        <div class="chart-container flex-grow" style="height: 300px;">
+                            <canvas id="aiProductChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ticket Browser: individual processed tickets -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200/80 p-4 mb-6">
+                    <h2 class="text-lg font-semibold mb-1">Processed Ticket Browser</h2>
+                    <p class="text-sm text-gray-500 mb-4">Click any row to open the ticket in Freshdesk. Hover for AI summary.</p>
+                    <div class="overflow-x-auto max-h-96">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50 sticky top-0">
+                                <tr>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ticket</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Revised Subject</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">ERP / Integration</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Severity</th>
+                                    <th scope="col" class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Sentiment</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ai-ticket-browser-body" class="bg-white divide-y divide-gray-200 text-sm">
+                                <tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">No tickets processed yet.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200/80 p-4">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-2">
+                        <h2 class="text-lg font-semibold flex-shrink-0">AI Processing Log</h2>
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <select id="ai-log-filter" class="text-sm border-gray-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 px-3 py-1.5" onchange="window.renderAiLogTable()">
+                                <option value="all">All Logs (Last 300)</option>
+                                <option value="success">Processed Successfully</option>
+                                <option value="skipped">Skipped (Noise)</option>
+                                <option value="error">Errors</option>
+                            </select>
+                            <span class="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full hidden lg:inline-block">Dry-Run rows show the AI preview — exactly what <em>would</em> be written to Freshdesk</span>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto max-h-96">
+                        <table class="min-w-full divide-y divide-gray-200 text-sm">
+                            <thead class="bg-gray-50 sticky top-0">
+                                <tr>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Timestamp</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Ticket</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Mode</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Status</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Proposed Subject <span class="text-indigo-400">(AI Preview)</span></th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">AI Summary <span class="text-indigo-400">(AI Preview)</span></th>
+                                </tr>
+                            </thead>
+                            <tbody id="ai-log-table-body" class="bg-white divide-y divide-gray-200">
+                                <tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">No logs found.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Data Health: Unmatched Survey Records -->
+                <div class="bg-white rounded-xl shadow-sm border border-red-200/80 p-4 mt-6">
+                    <h2 class="text-lg font-semibold text-red-600 mb-1">Data Health: Unmatched Survey Records</h2>
+                    <p class="text-sm text-gray-500 mb-4">These survey respondents could not be matched to a company in the CSV database by domain or name. Review and update your <code>customer_data.csv</code> to fix them.</p>
+                    <div class="overflow-x-auto max-h-64">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50 sticky top-0">
+                                <tr>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Survey Date</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Unmatched Company</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Domain</th>
+                                </tr>
+                            </thead>
+                            <tbody id="unmatched-records-body" class="bg-white divide-y divide-gray-200 text-sm">
+                                <tr><td colspan="4" class="px-3 py-4 text-center text-green-600 font-medium">✅ All records matched successfully!</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Data Health: AI Classification Review Queue -->
+                <div class="bg-white rounded-xl shadow-sm border border-amber-200/80 p-4 mt-6">
+                    <div class="flex flex-wrap items-start justify-between gap-2 mb-1">
+                        <h2 class="text-lg font-semibold text-amber-700">⚠️ Data Health: AI Classification Review Queue</h2>
+                        <span class="text-xs text-gray-400 bg-gray-100 px-3 py-1 rounded-full">Tickets the AI processed but that may need a human check</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mb-4">These tickets were processed but flagged as <strong>Unclassified</strong> (integration = general), <strong>Critical Severity</strong>, or <strong>Resolution Pending</strong>. Click any ticket number to open it in Freshdesk.</p>
+                    <div class="overflow-x-auto max-h-80">
+                        <table class="min-w-full divide-y divide-gray-200 text-sm">
+                            <thead class="bg-amber-50 sticky top-0">
+                                <tr>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Ticket</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Proposed Subject</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Integration</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Severity</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Resolution</th>
+                                    <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Flag Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ai-health-review-body" class="bg-white divide-y divide-gray-200">
+                                <tr><td colspan="6" class="px-3 py-4 text-center text-gray-400 text-xs">Loading review queue...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
         </main>
     </div>
 
@@ -705,6 +933,6 @@
         </div>
     </div>
 
-    <script src="customer_health_dashboard.js?v=13"></script>
+    <script src="customer_health_dashboard.js?v=19"></script>
 </body>
 </html>
