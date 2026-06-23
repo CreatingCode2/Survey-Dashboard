@@ -1113,7 +1113,7 @@ function processTicket(ticketId, dryRun) {
     "- proposed_subject: A revised subject line. You MUST include the brackets. If integration is 'None' or 'Unknown', format strictly as '[{Product Area}]: {Issue Type} - {Short Description}'. Otherwise, format strictly as '[{Product Area} - {Integration}]: {Issue Type} - {Short Description}'. (Max 80 chars)\n" +
     "- issue_type: A specific issue category. Use one of: Configuration Issue, Integration Failure, Batch Processing Issue, Installation, Data File Update, SFTP Access Issue, Service Interruption, How-To, Account Management, Feature Request, Notification, Other.\n" +
     "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'.\n" +
-    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]' (e.g. 'DES - Email Append'). If it involves an ERP, you MUST extract any specific module or interface mentioned (e.g., HCM, FIN, CS, Campus Solutions, Admin, Self Service, Classic, Fluid, EDI). Format exactly as '[Base ERP] - [Module]' (e.g. 'PeopleSoft - HCM' or 'Banner - Self Service'). If no module is mentioned, just output the Base ERP name. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations — use 'None' for those.\n" +
+    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]' (e.g. 'DES - Email Append'). If it involves an ERP, you MUST aggressively scan the conversation for specific modules or interfaces (e.g., explicitly look for 'HCM', 'FIN', 'CS', 'Campus Solutions', 'Admin', 'Self Service', 'Classic', 'Fluid', 'EDI'). Format exactly as '[Base ERP] - [Module]' (e.g. 'PeopleSoft - HCM' or 'Banner - Self Service'). If no module is mentioned, output the Base ERP name. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
     "- platform: MUST be the exact Agent-Assigned Platform if provided. Otherwise: Cloud, Windows, Linux, or Other.\n" +
     "- severity: critical, high, medium, or low.\n" +
     "- resolution: solution-provided, fixed-bug, user-error, workaround-provided, escalated, or pending.\n" +
@@ -1561,12 +1561,8 @@ function batchProcessTickets(dryRun) {
       break;
     }
     
-    // Fetch tickets updated in the last daysBack days (all statuses; we filter below)
-    var cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-    var updatedSince = cutoffDate.toISOString().split('.')[0] + 'Z';
-    var url = 'https://' + domain + '/api/v2/tickets?updated_since='
-              + encodeURIComponent(updatedSince) + '&per_page=30&page=' + page;
+    // Fetch newest tickets first using created_at desc. This avoids paging through thousands of old tickets.
+    var url = 'https://' + domain + '/api/v2/tickets?order_by=created_at&order_type=desc&per_page=30&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     
     if (res.getResponseCode() !== 200) {
