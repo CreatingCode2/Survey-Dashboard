@@ -2228,31 +2228,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     
     function renderUnmatchedSurveys() {
-        const container = document.getElementById('unmatched-surveys-container');
+        const container = document.getElementById('unmatched-records-body');
         if (!container) return;
         
         container.innerHTML = '';
         if (unmatchedSurveys.length === 0) {
-            container.innerHTML = '<p class="text-sm text-gray-500 italic px-2 py-1">All surveys matched successfully!</p>';
+            container.innerHTML = '<tr><td colspan="4" class="px-3 py-4 text-center text-green-600 font-medium">✨ All records matched successfully!</td></tr>';
             return;
         }
         
         unmatchedSurveys.forEach(survey => {
-            const div = document.createElement('div');
-            div.className = 'flex justify-between items-center text-sm py-2 px-3 hover:bg-gray-50 rounded';
+            const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50';
             
             // Format date nicely
             const dateObj = new Date(survey.date);
             const dateStr = !isNaN(dateObj) ? dateObj.toLocaleDateString() : survey.date;
 
-            div.innerHTML = `
-                <div class="flex flex-col">
-                    <span class="font-medium text-gray-800">${survey.name}</span>
-                    <span class="text-xs text-gray-500">${survey.email}</span>
-                </div>
-                <div class="text-xs text-gray-400">${dateStr}</div>
+            // Try to extract a domain from the email if possible
+            let domain = survey.domain || '';
+            if (!domain && survey.email) {
+                const parts = survey.email.split('@');
+                if (parts.length === 2) domain = parts[1];
+            }
+
+            tr.innerHTML = `
+                <td class="px-3 py-2 whitespace-nowrap text-gray-500">${dateStr}</td>
+                <td class="px-3 py-2 whitespace-nowrap font-medium text-gray-800">${survey.name}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-gray-500">${survey.email}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-gray-500"><a href="http://${domain}" target="_blank" class="text-indigo-600 hover:underline">${domain}</a></td>
             `;
-            container.appendChild(div);
+            container.appendChild(tr);
         });
     }
 
