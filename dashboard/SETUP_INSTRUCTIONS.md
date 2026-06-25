@@ -550,3 +550,54 @@ To prevent the AI from processing certain Freshdesk ticket types, open `Code.gs`
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal', 'YourNewType'];
 ```
 Then redeploy.
+
+---
+
+## 12. AI Development Rules (Read First — AI Agents Must Follow These)
+
+> These rules apply to any AI assistant (Antigravity, Gemini, Copilot, etc.) making changes to this project. They exist because a 6/23/2026 AI edit accidentally deleted a critical variable (`MAX_EXECUTION_TIME_MS`), causing 138 batch failures. These rules prevent that from happening again.
+
+### Rule 1 — Commit Every Code Change to Git Immediately
+- Every change to `Code.gs`, `customer_health_dashboard.js`, or `customer_health_dashboard.html` must be committed to git **before** moving on to the next task.
+- Commit message must include `[AI]` prefix so changes are traceable: e.g. `[AI] fix(batch): restore MAX_EXECUTION_TIME_MS definition`
+- **Never** accumulate multiple AI edits without committing. One logical change = one commit.
+
+### Rule 2 — Never Touch Batch Logic Without a Diff First
+- Before modifying anything in `batchProcessTickets()`, `batchProcessTicketsTrigger()`, or `startBatchAiJob()`, run:
+  ```
+  git diff <last-working-commit> HEAD -- Code.gs
+  ```
+- Confirm `MAX_EXECUTION_TIME_MS` is still defined inside `batchProcessTickets()` after any edit.
+- Confirm `cleanupBatchTriggers()` still exists and is called from `batchProcessTickets()` on job completion.
+
+### Rule 3 — Do Not Break Working Functionality
+- Before fixing a bug, verify the fix does not remove or overwrite code that is currently working.
+- If a function is working correctly, do not rewrite it — make the minimum surgical change needed.
+- When in doubt, add to code rather than replace it.
+
+### Rule 4 — Use the Backup Branch for Risky Changes
+- The repo has a `backup/survey-dashboard-state` branch for rollback.
+- For any change that touches the GAS execution/trigger/timing logic, push current state to the backup branch first:
+  ```
+  git push origin master:backup/survey-dashboard-state --force
+  ```
+
+### Rule 5 — Always Stay on `master`
+- All work must be done on the `master` branch.
+- Push all changes to both `master` and `backup/survey-dashboard-state` at end of each session.
+
+### Rule 6 — Key Variables That Must Never Be Removed
+The following variables/functions are critical to batch operation. Never delete them:
+| Variable / Function | File | Purpose |
+|---|---|---|
+| `MAX_EXECUTION_TIME_MS` | `Code.gs` ~line 1545 | GAS 6-min execution guard |
+| `batchProcessTicketsTrigger()` | `Code.gs` ~line 1440 | Time-based trigger entry point |
+| `cleanupBatchTriggers()` | `Code.gs` ~line 1682 | Removes orphaned triggers on job complete |
+| `BATCH_ADMIN_EMAILS` | `Code.gs` line 1 | Role-based access control for batch jobs |
+| `EXCLUDED_TICKET_TYPES` | `Code.gs` ~line 1525 | Noise filter for batch |
+
+### Rule 7 — After Any Deployment, Verify in Apps Script
+After copying `Code.gs` to the Apps Script editor:
+1. Check the Triggers panel for orphaned `batchProcessTicketsTrigger` time-based triggers and delete them
+2. Re-authorize the project by running any function manually (ensures `script.scriptapp` scope is granted)
+3. Deploy a **New Version** — do not overwrite the same version number
