@@ -385,6 +385,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`      ERP: "${finalRecord.erp}"`);
             console.log(`      Match method: ${matchMethod}`);
 
+            if (!masterData) {
+                unmatchedSurveys.push(finalRecord);
+            }
+
             return finalRecord;
         }).filter(r => {
             const isValid = r.company && r.company.trim().length > 0;
@@ -537,6 +541,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchData() {
         const loadingSpinner = document.getElementById('loading-spinner');
         const dashboardContent = document.getElementById('dashboard-content');
+
+        unmatchedSurveys = [];
 
         loadingSpinner.classList.remove('hidden');
 
@@ -2272,6 +2278,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateCharts(data);
         renderFeedbackList(data);
         renderDataTable(data);
+        renderUnmatchedSurveys();
     }
 
     updateCsmDropdowns();
