@@ -1711,7 +1711,9 @@ function fullYearAudit() {
     'oracle: security notification','uptime robot','zoom','tempo','basecamp',
     'rejected posting to infdba','runner edq: holiday reminder','confluence',
     'your service request has been received and will be assigned',
-    'recall:', 'passcode'
+    'recall:', 'passcode', 'new voicemail', 'unused transaction pool expires',
+    'melissa product news and updates', 'melissa data subscription update available',
+    'file is complete and updated', 'completed file posted on ftp', 'transactions low'
   ];
 
   var rows = [['Ticket #','Subject','Status','Type','Created','AI Tagged in FD','In Sheet','Category']];
@@ -1996,7 +1998,14 @@ function batchProcessTickets(dryRun) {
           subject.indexOf('your service request has been received and will be assigned') !== -1 ||
           subject.indexOf('confluence') !== -1 ||
           subject.indexOf('recall:') !== -1 ||
-          subject.indexOf('passcode') !== -1) {
+          subject.indexOf('passcode') !== -1 ||
+          subject.indexOf('new voicemail') !== -1 ||
+          subject.indexOf('unused transaction pool expires') !== -1 ||
+          subject.indexOf('melissa product news') !== -1 ||
+          subject.indexOf('melissa data subscription update') !== -1 ||
+          subject.indexOf('file is complete and updated') !== -1 ||
+          subject.indexOf('completed file posted on ftp') !== -1 ||
+          subject.indexOf('transactions low') !== -1) {
         skippedCount++;
         continue;
       }
