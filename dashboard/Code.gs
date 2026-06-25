@@ -1771,7 +1771,7 @@ function batchProcessTickets(dryRun) {
         continue;
       }
       
-      var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761];
+      var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847];
       if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
         skippedCount++;
         continue;
@@ -2030,7 +2030,9 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
              + '✅ Successfully Processed: ' + processedCount + ' ticket(s)\n'
              + '❌ Failed:                 ' + failedCount    + ' ticket(s)\n'
              + '⏭️  Skipped:                ' + skippedCount   + ' ticket(s)\n'
-             + '   (Skipped = already processed, Spam, Runner Internal, or OOO auto-replies)\n'
+             + '   (Skipped = open/pending tickets, already AI-processed, excluded types\n'
+             + '    (Spam/Runner Internal), noise filters (Basecamp, Confluence, OOO, etc.),\n'
+             + '    or hardcoded excluded ticket numbers)\n'
              + partialNote
              + '\n---\nView the full log in the Ticket Intelligence tab of the Customer Health Dashboard.\n'
              + 'https://support.runnertech.com';
