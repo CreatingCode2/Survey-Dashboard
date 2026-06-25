@@ -1675,13 +1675,19 @@ function batchProcessTickets(dryRun) {
   
   while (true) {
     if (new Date().getTime() - startTime > MAX_EXECUTION_TIME_MS) {
-      Logger.log('Execution limit approaching, pausing batch. State saved - background trigger will resume.');
-      
-      // Chain the background trigger to resume exactly where we left off
-      try {
-        ScriptApp.newTrigger('batchProcessTicketsTrigger').timeBased().after(60 * 1000).create();
-      } catch (e) {
-        Logger.log('Failed to create continuation trigger: ' + e.message);
+      // If an inner-loop check already marked the job complete (e.g. daysBack hit
+      // right as the timer was about to fire), honour that and send the email.
+      if (props.getProperty('AI_Batch_Running') !== 'true') {
+        jobFullyComplete = true;
+        Logger.log('Time limit reached but job was already marked complete — sending email.');
+      } else {
+        Logger.log('Execution limit approaching, pausing batch. State saved - background trigger will resume.');
+        // Chain the background trigger to resume exactly where we left off
+        try {
+          ScriptApp.newTrigger('batchProcessTicketsTrigger').timeBased().after(60 * 1000).create();
+        } catch (e) {
+          Logger.log('Failed to create continuation trigger: ' + e.message);
+        }
       }
       break;
     }
@@ -1814,6 +1820,10 @@ function batchProcessTickets(dryRun) {
       // ~2s gap between tickets to stay within rate limits (reduced from 4s)
       Utilities.sleep(2000);
     }
+    
+    // If jobFullyComplete was set inside the inner loop (daysBack hit, limit hit),
+    // break out of the outer while immediately — do NOT advance to the next page.
+    if (jobFullyComplete) break;
     
     page++;
     props.setProperty('AI_Batch_Page',      page.toString());
