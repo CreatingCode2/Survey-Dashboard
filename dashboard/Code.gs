@@ -1719,6 +1719,15 @@ function batchProcessTickets(dryRun) {
       var ticketId     = tkts[i].id;
       var ticketStatus = tkts[i].status;
       var ticketType   = tkts[i].type || '';
+      var ticketDate   = new Date(tkts[i].created_at);
+      
+      // Stop the batch if we've reached tickets older than our daysBack limit
+      if (daysBack > 0 && (new Date().getTime() - ticketDate.getTime()) / (1000 * 3600 * 24) > daysBack) {
+        props.setProperty('AI_Batch_Running', 'false');
+        jobFullyComplete = true;
+        Logger.log('Batch complete! Reached the ' + daysBack + ' day history limit.');
+        break;
+      }
       
       // 0. Only process Resolved (4) or Closed (5) tickets
       if (ticketStatus !== 4 && ticketStatus !== 5) {
