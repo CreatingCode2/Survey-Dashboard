@@ -1508,6 +1508,28 @@ function batchProcessTicketsTrigger() {
   }
 }
 
+function batchProcessTicketsTrigger() {
+  var props = PropertiesService.getScriptProperties();
+  var isRunning = props.getProperty('AI_Batch_Running');
+  if (isRunning !== 'true') return;
+
+  // CRITICAL: Prevent two trigger invocations from running simultaneously.
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(1000); // wait up to 1 second; if still locked, bail out
+  } catch (e) {
+    Logger.log('Another batch run is already in progress. Skipping this trigger invocation.');
+    return;
+  }
+
+  try {
+    var dryRun = props.getProperty('AI_Batch_DryRun') === 'true';
+    batchProcessTickets(dryRun);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function startBatchAiJob(dryRun, triggeredBy, triggeredByEmail, limit, daysBack) {
   var props = PropertiesService.getScriptProperties();
   props.setProperty('AI_Batch_Running', 'true');
@@ -1618,6 +1640,9 @@ function batchProcessTickets(dryRun) {
     
     if (res.getResponseCode() !== 200) {
       Logger.log('Failed to fetch tickets for batch: ' + res.getContentText());
+      // CRITICAL FIX: If we fail to fetch a page (e.g. Rate Limit 429), we MUST tell the UI to stop.
+      props.setProperty('AI_Batch_Running', 'false');
+      jobFullyComplete = true; // Clean up and send the email with whatever progress we made
       break;
     }
     

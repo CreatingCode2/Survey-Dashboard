@@ -3276,12 +3276,16 @@ document.addEventListener('DOMContentLoaded', () => {
             .then(data => {
                 const statusText     = document.getElementById('ai-status-text');
                 const statusProgress = document.getElementById('ai-status-progress');
+                const statusFailed   = document.getElementById('ai-status-failed');
+                const statusSkipped  = document.getElementById('ai-status-skipped');
 
                 const batchInfo = data.message || data;
 
                 if (batchInfo.running) {
                     if (statusText)     statusText.textContent     = 'Batch job running (Page ' + (batchInfo.page || 1) + ')...';
-                    if (statusProgress) statusProgress.textContent = (batchInfo.ticketsProcessed || 0) + ' processed';
+                    if (statusProgress) statusProgress.textContent = '✅ ' + (batchInfo.ticketsProcessed || 0) + ' processed';
+                    if (statusFailed)   statusFailed.textContent   = '❌ ' + (batchInfo.failedCount || 0) + ' failed';
+                    if (statusSkipped)  statusSkipped.textContent  = '⏭ ' + (batchInfo.skippedCount || 0) + ' skipped';
                 } else {
                     clearInterval(aiPollingInterval);
                     window.stopAiBatch();
