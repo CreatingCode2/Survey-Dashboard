@@ -1884,7 +1884,7 @@ function retryFailedTicketsJob(triggeredBy, triggeredByEmail) {
 // Run once from Apps Script editor after redeployment.
 // ─────────────────────────────────────────────────────────────
 function removeNoiseTicketsFromSheet() {
-  var TICKETS_TO_REMOVE = ['90819', '90789', '90790', '90800', '90802', '90844', '90859', '90861', '91057'];
+  var TICKETS_TO_REMOVE = ['90819', '90789', '90790', '90800', '90802', '90844', '90859', '90861', '91057', '90791', '90855', '90847', '90735', '90738', '90739', '90745', '90746', '90757', '90760', '90761', '90763', '90768', '90972'];
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var removedAiData = 0;
@@ -1919,7 +1919,6 @@ function removeNoiseTicketsFromSheet() {
 
   var msg = 'Cleanup complete. Removed ' + removedAiData + ' rows from Ticket_AI_Data and ' + removedLog + ' rows from AI_Processing_Log.';
   Logger.log(msg);
-  SpreadsheetApp.getUi().alert(msg);
 }
 
 
