@@ -1992,7 +1992,7 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
 function revertNoiseTickets() {
   var ticketsToRevert = [90819, 90789, 90790, 90800, 90802, 90844, 90859, 90861, 91057, 90791, 90855, 90847, 90735, 90738, 90739, 90745, 90746, 90757, 90760, 90761, 90763, 90768, 90972];
   var domain = 'runnertech.freshdesk.com';
-  var apiKey = PropertiesService.getScriptProperties().getProperty('FRESHDESK_API_KEY');
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
   
   if (!apiKey) {
     console.error("No API key found.");
