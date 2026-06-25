@@ -2232,6 +2232,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function suggestCompanyMatches(email, companyName) {
+        if (!email) return [];
+        const suggestions = [];
+        
+        if (email.includes('@')) {
+            const domain = email.split('@')[1].toLowerCase();
+            // Extract the core domain name (e.g. olemissalumni -> olemiss)
+            const domainBase = domain.split('.')[0].replace(/alumni|students|staff/g, '');
+            
+            if (domainBase.length > 3) {
+                const allMaster = Object.values(customerMasterData);
+                for (const master of allMaster) {
+                    if (master.name) {
+                        const masterNameLower = master.name.toLowerCase();
+                        // If the customer name contains the core domain word, suggest it
+                        if (masterNameLower.includes(domainBase)) {
+                            if (!suggestions.includes(master.name)) suggestions.push(master.name);
+                        }
+                    }
+                }
+            }
+        }
+        return suggestions.slice(0, 2); // Max 2 suggestions
+    }
     
     function renderUnmatchedSurveys() {
         const container = document.getElementById('unmatched-records-body');
@@ -2254,15 +2278,24 @@ document.addEventListener('DOMContentLoaded', () => {
             // Try to extract a domain from the email if possible
             let domain = survey.domain || '';
             if (!domain && survey.email) {
-                const parts = survey.email.split('@');
-                if (parts.length === 2) domain = parts[1];
+                domain = survey.email.split('@')[1] || '';
+            }
+
+            let displayCompany = survey.company;
+            if (!displayCompany || displayCompany === 'undefined' || displayCompany.trim() === '') {
+                const suggestions = suggestCompanyMatches(survey.email, survey.company);
+                if (suggestions.length > 0) {
+                    displayCompany = `<span class="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded">Suggests: ${suggestions.join(' or ')}</span>`;
+                } else {
+                    displayCompany = `<span class="text-xs text-gray-400 italic">undefined</span>`;
+                }
             }
 
             tr.innerHTML = `
-                <td class="px-3 py-2 whitespace-nowrap text-gray-500">${dateStr}</td>
-                <td class="px-3 py-2 whitespace-nowrap font-medium text-gray-800">${survey.name}</td>
-                <td class="px-3 py-2 whitespace-nowrap text-gray-500">${survey.email}</td>
-                <td class="px-3 py-2 whitespace-nowrap text-gray-500"><a href="http://${domain}" target="_blank" class="text-indigo-600 hover:underline">${domain}</a></td>
+                <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">${dateStr}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">${displayCompany}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">${survey.email || '—'}</td>
+                <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500"><a href="http://${domain}" target="_blank" class="text-indigo-600 hover:underline">${domain || '—'}</a></td>
             `;
             container.appendChild(tr);
         });
