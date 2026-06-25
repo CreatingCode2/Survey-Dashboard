@@ -1196,19 +1196,50 @@ function processTicket(ticketId, dryRun) {
     return { status: "error", message: e.message };
   }
   
-  // --- AGGRESSIVE POST-PROCESSING SANITIZATION ---
-  if (aiResult && aiResult.integration) {
-    if (aiResult.integration.indexOf('SurveyDIG') !== -1) {
-      aiResult.integration = 'SurveyDIG';
-    } else if (aiResult.integration.indexOf('Text Connector') !== -1 || aiResult.integration.indexOf('Guild Core Engine') !== -1) {
-      aiResult.integration = 'None';
+  // --- AGGRESSIVE POST-PROCESSING SANITIZATION & WHITELISTS ---
+  if (aiResult) {
+    // 1. Strict Validation for Products (Must be exact match, else 'Other')
+    var VALID_PRODUCTS = [
+      'CLEAN_Address', 'CLEAN_Cloud', 'CLEAN_Data Portal', 'CLEAN_Entry', 
+      'CLEAN_File', 'CLEAN_Update', 'Data Enhancement Services', 
+      'Documentation', 'SurveyDIG', 'On boarding', 'Other'
+    ];
+    if (aiResult.product_area && VALID_PRODUCTS.indexOf(aiResult.product_area) === -1) {
+      aiResult.product_area = 'Other';
+    }
+
+    // 2. Intelligent Validation for ERPs (Must START with an approved Base ERP)
+    var VALID_BASE_ERPS = [
+      'Advance', 'Banner', 'Colleague', 'JD Edwards', 'Oracle EBS', 
+      'Oracle Database', 'PeopleSoft', 'SurveyDIG', 'DES', 'None'
+    ];
+    
+    if (aiResult.integration) {
+      // First strip out known stubborn hallucinations
+      if (aiResult.integration.indexOf('Text Connector') !== -1 || aiResult.integration.indexOf('Guild Core Engine') !== -1) {
+        aiResult.integration = 'None';
+      }
+      
+      // Then validate it starts with an approved Base ERP
+      var startsWithValidErp = false;
+      for (var k = 0; k < VALID_BASE_ERPS.length; k++) {
+        if (aiResult.integration.indexOf(VALID_BASE_ERPS[k]) === 0) {
+          startsWithValidErp = true;
+          break;
+        }
+      }
+      if (!startsWithValidErp) {
+        aiResult.integration = 'None';
+      }
+    }
+
+    // 3. Scrub Subject Line
+    if (aiResult.proposed_subject) {
+      aiResult.proposed_subject = aiResult.proposed_subject.replace(/ - Text Connector/ig, '').replace(/ - Guild Core Engine/ig, '');
+      aiResult.proposed_subject = aiResult.proposed_subject.replace(/Text Connector/ig, 'None').replace(/Guild Core Engine/ig, 'None');
     }
   }
-  if (aiResult && aiResult.proposed_subject) {
-    aiResult.proposed_subject = aiResult.proposed_subject.replace(/ - Text Connector/ig, '').replace(/ - Guild Core Engine/ig, '');
-    aiResult.proposed_subject = aiResult.proposed_subject.replace(/Text Connector/ig, 'None').replace(/Guild Core Engine/ig, 'None');
-  }
-  // -----------------------------------------------
+  // -------------------------------------------------------------
   
   // 5. Apply Updates to Freshdesk (if not dry run)
   if (!dryRun) {
