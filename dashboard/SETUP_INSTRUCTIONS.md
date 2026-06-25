@@ -253,7 +253,7 @@ Before running the AI on real tickets, you have a safety switch:
 
 **What "Max Tickets" means:**
 - Leave it blank = process every eligible ticket it can find (the big historical backlog run)
-- Enter `20` = stop after 20 tickets (good for testing or small catch-up runs)
+- Enter `20` = stop after 20 successfully processed tickets (skipped/noise/failed tickets do not count towards this limit; it will continue searching until it successfully processes 20 tickets or exhausts all records)
 
 ---
 

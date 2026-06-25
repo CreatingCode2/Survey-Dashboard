@@ -1541,9 +1541,6 @@ function batchProcessTickets(dryRun) {
   var jobFullyComplete = false; // true only when we exhaust all pages or hit limit cleanly
   
   var startTime = new Date().getTime();
-  // GAS execution limit is 6 min. Stop after 4.5 min to safely save state.
-  var MAX_EXECUTION_TIME_MS = 4.5 * 60 * 1000;
-  
   while (true) {
     if (new Date().getTime() - startTime > MAX_EXECUTION_TIME_MS) {
       Logger.log('Execution limit approaching, pausing batch. State saved - background trigger will resume.');
@@ -1632,25 +1629,15 @@ function batchProcessTickets(dryRun) {
       
       // 4. Process the ticket
       try {
-        var result = processTicket(ticketId, dryRun);
-        if (result && result.status === 'success') {
-          processedCount++;
-          props.setProperty('AI_Batch_Count', processedCount.toString());
-        } else if (result && result.status === 'skipped') {
-          skippedCount++;
-          props.setProperty('AI_Batch_SkipCount', skippedCount.toString());
-        } else if (result && result.status === 'error') {
-          failedCount++;
-          props.setProperty('AI_Batch_FailCount', failedCount.toString());
-        }
-        
+        processTicket(ticketId, dryRun);
+        processedCount++;
+        props.setProperty('AI_Batch_Count',     processedCount.toString());
         props.setProperty('AI_Batch_SkipCount', skippedCount.toString());
-        props.setProperty('AI_Batch_FailCount', failedCount.toString());
         
         if (limit > 0 && processedCount >= limit) {
           props.setProperty('AI_Batch_Running', 'false');
           jobFullyComplete = true;
-          Logger.log('Batch complete! Reached limit of ' + limit + ' successfully processed tickets.');
+          Logger.log('Batch complete! Reached limit of ' + limit + ' tickets.');
           break;
         }
       } catch (e) {
