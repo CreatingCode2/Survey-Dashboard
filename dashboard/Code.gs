@@ -1196,6 +1196,20 @@ function processTicket(ticketId, dryRun) {
     return { status: "error", message: e.message };
   }
   
+  // --- AGGRESSIVE POST-PROCESSING SANITIZATION ---
+  if (aiResult && aiResult.integration) {
+    if (aiResult.integration.indexOf('SurveyDIG') !== -1) {
+      aiResult.integration = 'SurveyDIG';
+    } else if (aiResult.integration.indexOf('Text Connector') !== -1 || aiResult.integration.indexOf('Guild Core Engine') !== -1) {
+      aiResult.integration = 'None';
+    }
+  }
+  if (aiResult && aiResult.proposed_subject) {
+    aiResult.proposed_subject = aiResult.proposed_subject.replace(/ - Text Connector/ig, '').replace(/ - Guild Core Engine/ig, '');
+    aiResult.proposed_subject = aiResult.proposed_subject.replace(/Text Connector/ig, 'None').replace(/Guild Core Engine/ig, 'None');
+  }
+  // -----------------------------------------------
+  
   // 5. Apply Updates to Freshdesk (if not dry run)
   if (!dryRun) {
     var updatePayload = {
