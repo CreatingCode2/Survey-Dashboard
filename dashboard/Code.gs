@@ -962,6 +962,16 @@ function processTicket(ticketId, dryRun) {
   var ticketRes = UrlFetchApp.fetch(ticketUrl, fdOpts);
   if (ticketRes.getResponseCode() !== 200) throw new Error('Failed to fetch ticket: ' + ticketRes.getContentText());
   var ticket = JSON.parse(ticketRes.getContentText());
+
+  // SAFETY BACKSTOP: Never process open tickets, regardless of how this function was called.
+  // Status 4 = Resolved, Status 5 = Closed. Anything else is open/pending and must be skipped.
+  var ticketStatusInner = ticket.status;
+  if (ticketStatusInner !== 4 && ticketStatusInner !== 5) {
+    var openMsg = 'Ticket #' + ticketId + ' is not Resolved or Closed (status ' + ticketStatusInner + '). Skipping.';
+    Logger.log(openMsg);
+    logAiProcessing(ticketId, 'skipped', openMsg, dryRun, null);
+    return { status: 'skipped', message: openMsg };
+  }
   
   // 2. Fetch Conversations
   var convUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId + '/conversations';
