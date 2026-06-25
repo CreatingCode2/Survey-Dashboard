@@ -1653,6 +1653,92 @@ function getBatchAiStatus() {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
+// ─────────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC: Scans tickets and reports skip-reason breakdown.
+// Run from Apps Script editor. Does NOT process or modify anything.
+// Results appear in the execution log.
+// ─────────────────────────────────────────────────────────────────────────
+function diagnosticBatchScan() {
+  var props      = PropertiesService.getScriptProperties();
+  var apiKey     = props.getProperty('Freshdesk_Api_Key');
+  var domain     = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var daysBack   = 365;
+  var maxPages   = 15; // 15 pages x 30 tickets = up to 450 tickets scanned
+
+  var counts = {
+    openOrPending: 0, excludedType: 0, noiseSubject: 0,
+    hardcodedIgnore: 0, alreadyProcessed: 0, eligible: 0, total: 0
+  };
+
+  var EXCLUDED_LOCAL   = ['Spam', 'Runner Internal'];
+  var HARDCODED_LOCAL  = [90745, 90746, 90757, 90760, 90761, 90847];
+  var NOISE_PHRASES    = [
+    'out of office','automatic reply','auto-reply','vacation','autoreply',
+    'oracle: security notification','uptime robot','zoom','tempo','basecamp',
+    'rejected posting to infdba','runner edq: holiday reminder','confluence',
+    'your service request has been received and will be assigned'
+  ];
+
+  for (var page = 1; page <= maxPages; page++) {
+    var url = 'https://' + domain + '/api/v2/tickets?order_by=created_at&order_type=desc&per_page=30&page=' + page;
+    var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) { Logger.log('Page ' + page + ' failed: ' + res.getResponseCode()); break; }
+    var tkts = JSON.parse(res.getContentText());
+    if (tkts.length === 0) { Logger.log('No more tickets at page ' + page); break; }
+
+    for (var i = 0; i < tkts.length; i++) {
+      counts.total++;
+      var t          = tkts[i];
+      var ageDays    = (new Date().getTime() - new Date(t.created_at).getTime()) / (1000 * 3600 * 24);
+
+      if (ageDays > daysBack) {
+        Logger.log('Hit ' + daysBack + '-day limit at page ' + page + ', ticket #' + t.id);
+        logDiagnosticSummary(counts);
+        return;
+      }
+
+      var subject = (t.subject || '').toLowerCase();
+      var tags    = t.tags || [];
+      var cf      = t.custom_fields || {};
+
+      if (t.status !== 4 && t.status !== 5)                          { counts.openOrPending++;    continue; }
+      if (EXCLUDED_LOCAL.indexOf(t.type || '') !== -1)                { counts.excludedType++;     continue; }
+
+      var isNoise = false;
+      for (var n = 0; n < NOISE_PHRASES.length; n++) {
+        if (subject.indexOf(NOISE_PHRASES[n]) !== -1) { isNoise = true; break; }
+      }
+      if (subject.indexOf('runner edq') !== -1 && subject.indexOf('celebration') !== -1) isNoise = true;
+      if (isNoise)                                                     { counts.noiseSubject++;     continue; }
+      if (HARDCODED_LOCAL.indexOf(Number(t.id)) !== -1)               { counts.hardcodedIgnore++;  continue; }
+
+      var done = !!cf.cf_ai_summary_notes;
+      for (var tg = 0; tg < tags.length; tg++) {
+        if (tags[tg].toLowerCase().indexOf('ai:') === 0) { done = true; break; }
+      }
+      if (done) { counts.alreadyProcessed++; continue; }
+
+      counts.eligible++;
+      Logger.log('ELIGIBLE: #' + t.id + ' | ' + t.subject);
+    }
+  }
+  logDiagnosticSummary(counts);
+}
+
+function logDiagnosticSummary(counts) {
+  Logger.log('========== DIAGNOSTIC SCAN RESULTS ==========');
+  Logger.log('Total scanned:            ' + counts.total);
+  Logger.log('  Open/Pending (skipped): ' + counts.openOrPending);
+  Logger.log('  Excluded type:          ' + counts.excludedType);
+  Logger.log('  Noise subject filter:   ' + counts.noiseSubject);
+  Logger.log('  Hardcoded ignore list:  ' + counts.hardcodedIgnore);
+  Logger.log('  Already AI-processed:   ' + counts.alreadyProcessed);
+  Logger.log('  ELIGIBLE (unprocessed): ' + counts.eligible);
+  Logger.log('  (See ELIGIBLE lines above for ticket IDs)');
+  Logger.log('=============================================');
+}
+
 function batchProcessTickets(dryRun) {
   var props = PropertiesService.getScriptProperties();
   if (props.getProperty('AI_Batch_Running') !== 'true') return;
