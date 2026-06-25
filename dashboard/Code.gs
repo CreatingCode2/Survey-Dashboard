@@ -1654,6 +1654,139 @@ function getBatchAiStatus() {
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
 // ─────────────────────────────────────────────────────────────────────────
+// FULL YEAR AUDIT: Scans every Freshdesk ticket from 2026 and compares
+// against what's been AI-processed in the Google Sheet.
+// Creates/replaces an "Audit_2026" tab with full results.
+// Run from Apps Script editor. READ ONLY - modifies nothing in Freshdesk.
+// ─────────────────────────────────────────────────────────────────────────
+function fullYearAudit() {
+  var props      = PropertiesService.getScriptProperties();
+  var apiKey     = props.getProperty('Freshdesk_Api_Key');
+  var domain     = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var cutoffDate = new Date('2026-01-01T00:00:00Z');
+
+  // Build set of ticket IDs already in the Ticket_AI_Data sheet
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
+  var processedIds = {};
+  if (aiSheet) {
+    var aiData = aiSheet.getDataRange().getValues();
+    for (var r = 1; r < aiData.length; r++) {
+      var tid = String(aiData[r][0]).trim();
+      if (tid) processedIds[tid] = true;
+    }
+  }
+  Logger.log('Tickets in Ticket_AI_Data sheet: ' + Object.keys(processedIds).length);
+
+  // Scan Freshdesk
+  var allTickets = [];
+  var page = 1;
+  var auditUpdatedSince = cutoffDate.toISOString();
+  while (page <= 50) { // safety cap at 50 pages = 1500 tickets
+    var url = 'https://' + domain + '/api/v2/tickets?updated_since=' + auditUpdatedSince + '&order_by=created_at&order_type=desc&per_page=30&page=' + page;
+    var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) { Logger.log('Fetch failed at page ' + page); break; }
+    var tkts = JSON.parse(res.getContentText());
+    if (tkts.length === 0) break;
+
+    var hitCutoff = false;
+    for (var i = 0; i < tkts.length; i++) {
+      var created = new Date(tkts[i].created_at);
+      if (created < cutoffDate) { hitCutoff = true; break; }
+      allTickets.push(tkts[i]);
+    }
+    if (hitCutoff) break;
+    page++;
+    Utilities.sleep(300); // stay within rate limits
+  }
+
+  Logger.log('Total 2026 tickets found in Freshdesk: ' + allTickets.length);
+
+  // Categorize each ticket
+  var EXCLUDED_LOCAL  = ['Spam', 'Runner Internal'];
+  var HARDCODED_LOCAL = [90745, 90746, 90757, 90760, 90761, 90847];
+  var NOISE_PHRASES   = [
+    'out of office','automatic reply','auto-reply','vacation','autoreply',
+    'oracle: security notification','uptime robot','zoom','tempo','basecamp',
+    'rejected posting to infdba','runner edq: holiday reminder','confluence',
+    'your service request has been received and will be assigned',
+    'recall:', 'passcode'
+  ];
+
+  var rows = [['Ticket #','Subject','Status','Type','Created','AI Tagged in FD','In Sheet','Category']];
+  var counts = { open:0, excludedType:0, noise:0, hardcoded:0, aiTagged:0, inSheet:0, eligible:0 };
+
+  for (var j = 0; j < allTickets.length; j++) {
+    var t       = allTickets[j];
+    var subject = (t.subject || '').toLowerCase();
+    var tags    = t.tags || [];
+    var cf      = t.custom_fields || {};
+    var statusLabel = {1:'Open',2:'Pending',3:'Resolved',4:'Resolved',5:'Closed'}[t.status] || t.status;
+    var inSheet = processedIds[String(t.id)] ? 'YES' : 'NO';
+
+    var aiTagged = !!cf.cf_ai_summary_notes;
+    for (var tg = 0; tg < tags.length; tg++) {
+      if (tags[tg].toLowerCase().indexOf('ai:') === 0) { aiTagged = true; break; }
+    }
+
+    var category = '';
+    if (t.status !== 4 && t.status !== 5) {
+      category = 'OPEN/PENDING'; counts.open++;
+    } else if (EXCLUDED_LOCAL.indexOf(t.type || '') !== -1) {
+      category = 'EXCLUDED TYPE'; counts.excludedType++;
+    } else {
+      var isNoise = false;
+      for (var n = 0; n < NOISE_PHRASES.length; n++) {
+        if (subject.indexOf(NOISE_PHRASES[n]) !== -1) { isNoise = true; break; }
+      }
+      if (subject.indexOf('runner edq') !== -1 && subject.indexOf('celebration') !== -1) isNoise = true;
+      if (isNoise) {
+        category = 'NOISE FILTER'; counts.noise++;
+      } else if (HARDCODED_LOCAL.indexOf(Number(t.id)) !== -1) {
+        category = 'HARDCODED IGNORE'; counts.hardcoded++;
+      } else if (aiTagged) {
+        category = 'ALREADY PROCESSED (ai: tag)'; counts.aiTagged++;
+        if (inSheet === 'NO') category += ' - MISSING FROM SHEET';
+      } else {
+        category = 'ELIGIBLE - NOT YET PROCESSED'; counts.eligible++;
+      }
+    }
+    if (inSheet === 'YES') counts.inSheet++;
+
+    rows.push([t.id, t.subject, statusLabel, t.type || '', t.created_at, aiTagged ? 'YES' : 'NO', inSheet, category]);
+  }
+
+  // Summary rows at top
+  var summary = [
+    ['=== AUDIT SUMMARY ===','','','','','','',''],
+    ['Total 2026 tickets in Freshdesk:', allTickets.length,'','','','','',''],
+    ['Tickets in Ticket_AI_Data sheet:', Object.keys(processedIds).length,'','','','','',''],
+    ['','','','','','','',''],
+    ['OPEN/PENDING (not yet closeable):',  counts.open,'','','','','',''],
+    ['Excluded type (Spam/Internal):',     counts.excludedType,'','','','','',''],
+    ['Noise filter (auto-email/internal):',counts.noise,'','','','','',''],
+    ['Hardcoded ignore list:',             counts.hardcoded,'','','','','',''],
+    ['Already processed (ai: tags in FD):',counts.aiTagged,'','','','','',''],
+    ['ELIGIBLE - not yet processed:',      counts.eligible,'','','','','',''],
+    ['','','','','','','',''],
+    ['=== DETAIL (one row per ticket) ===','','','','','','','']
+  ];
+
+  // Write to Audit_2026 sheet
+  var auditSheet = ss.getSheetByName('Audit_2026');
+  if (auditSheet) ss.deleteSheet(auditSheet);
+  auditSheet = ss.insertSheet('Audit_2026');
+  auditSheet.getRange(1, 1, summary.length, 8).setValues(summary);
+  auditSheet.getRange(summary.length + 1, 1, rows.length, 8).setValues(rows);
+  auditSheet.autoResizeColumns(1, 8);
+
+  Logger.log('Audit complete. Open the Audit_2026 tab in your Google Sheet.');
+  Logger.log('SUMMARY: ' + allTickets.length + ' total | ' + counts.open + ' open | ' +
+             counts.aiTagged + ' already processed | ' + counts.eligible + ' eligible');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // DIAGNOSTIC: Scans tickets and reports skip-reason breakdown.
 // Run from Apps Script editor. Does NOT process or modify anything.
 // Results appear in the execution log.
@@ -1677,11 +1810,16 @@ function diagnosticBatchScan() {
     'out of office','automatic reply','auto-reply','vacation','autoreply',
     'oracle: security notification','uptime robot','zoom','tempo','basecamp',
     'rejected posting to infdba','runner edq: holiday reminder','confluence',
-    'your service request has been received and will be assigned'
+    'your service request has been received and will be assigned',
+    'recall:', 'passcode'
   ];
 
+  var d = new Date();
+  d.setDate(d.getDate() - daysBack);
+  var updatedSince = d.toISOString();
+
   for (var page = 1; page <= maxPages; page++) {
-    var url = 'https://' + domain + '/api/v2/tickets?order_by=created_at&order_type=desc&per_page=30&page=' + page;
+    var url = 'https://' + domain + '/api/v2/tickets?updated_since=' + updatedSince + '&order_by=created_at&order_type=desc&per_page=30&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) { Logger.log('Page ' + page + ' failed: ' + res.getResponseCode()); break; }
     var tkts = JSON.parse(res.getContentText());
@@ -1759,6 +1897,10 @@ function batchProcessTickets(dryRun) {
   // GAS execution limit is 6 min. Stop after 4.5 min to safely save state.
   var MAX_EXECUTION_TIME_MS = 4.5 * 60 * 1000;
   
+  var d = new Date();
+  d.setDate(d.getDate() - daysBack);
+  var updatedSince = d.toISOString();
+  
   while (true) {
     if (new Date().getTime() - startTime > MAX_EXECUTION_TIME_MS) {
       // If an inner-loop check already marked the job complete (e.g. daysBack hit
@@ -1785,8 +1927,8 @@ function batchProcessTickets(dryRun) {
       break;
     }
     
-    // Fetch newest tickets first using created_at desc. This avoids paging through thousands of old tickets.
-    var url = 'https://' + domain + '/api/v2/tickets?order_by=created_at&order_type=desc&per_page=30&page=' + page;
+    // Fetch newest tickets first using created_at desc.
+    var url = 'https://' + domain + '/api/v2/tickets?updated_since=' + updatedSince + '&order_by=created_at&order_type=desc&per_page=30&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     
     if (res.getResponseCode() !== 200) {
@@ -1852,7 +1994,9 @@ function batchProcessTickets(dryRun) {
           subject.indexOf('runner edq: holiday reminder') !== -1 ||
           (subject.indexOf('runner edq') !== -1 && subject.indexOf('celebration') !== -1) ||
           subject.indexOf('your service request has been received and will be assigned') !== -1 ||
-          subject.indexOf('confluence') !== -1) {
+          subject.indexOf('confluence') !== -1 ||
+          subject.indexOf('recall:') !== -1 ||
+          subject.indexOf('passcode') !== -1) {
         skippedCount++;
         continue;
       }
