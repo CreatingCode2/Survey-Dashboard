@@ -1026,7 +1026,8 @@ function processTicket(ticketId, dryRun) {
       subjLower.indexOf('basecamp') !== -1 ||
       subjLower.indexOf('recall:') !== -1 ||
       subjLower.indexOf('rejected posting to infdba') !== -1 ||
-      subjLower.indexOf('runner edq') !== -1 ||
+      subjLower.indexOf('runner edq: holiday reminder') !== -1 ||
+      subjLower.indexOf('runner edq celebrations') !== -1 ||
       subjLower.indexOf('confluence') !== -1) {
     isNoiseTicket = true;
   }
@@ -1066,14 +1067,13 @@ function processTicket(ticketId, dryRun) {
   var EXCLUDED_SENDER_EMAILS = [
     'giselle.mazurat@runnertechnologies.com',  // Internal Runner — not customer tickets
     'lourdes.delfin@runchero.com',             // Known noise sender
-    'listserv@list.unm.edu',                   // Listserv distribution — not customer
+    'listserv@list.unm.edu',                   // Specific listserv address — not a customer
     'samratkapoor620@gmail.com',               // Spam/unsolicited
     'no-reply@mermaid.ai'                      // Automated tool notification
   ];
   var EXCLUDED_SENDER_DOMAINS = [
     'melissa.com', 'melissadata.com',          // Melissa file notifications
-    'mermaid.ai',                              // Mermaid automated emails
-    'list.unm.edu'                             // UNM listserv domain
+    'mermaid.ai'                               // Mermaid automated emails
   ];
   if (!isNoiseTicket && ticket.requester_id) {
     try {
@@ -1663,7 +1663,8 @@ function batchProcessTickets(dryRun) {
           subject.indexOf('tempo') !== -1 ||
           subject.indexOf('basecamp') !== -1 ||
           subject.indexOf('rejected posting to infdba') !== -1 ||
-          subject.indexOf('runner edq') !== -1 ||
+          subject.indexOf('runner edq: holiday reminder') !== -1 ||
+          subject.indexOf('runner edq celebrations') !== -1 ||
           subject.indexOf('confluence') !== -1) {
         skippedCount++;
         continue;
