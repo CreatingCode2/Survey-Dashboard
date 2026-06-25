@@ -1063,7 +1063,6 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 4b. Block tickets from known noise sender emails/domains
-  // Uses the requester data already fetched with ?include=requester
   var EXCLUDED_SENDER_EMAILS = [
     'giselle.mazurat@runnertechnologies.com',  // Internal Runner — not customer tickets
     'lourdes.delfin@runchero.com',             // Known noise sender
@@ -1074,7 +1073,10 @@ function processTicket(ticketId, dryRun) {
   ];
   var EXCLUDED_SENDER_DOMAINS = [
     'melissa.com', 'melissadata.com',          // Melissa file notifications
-    'mermaid.ai'                               // Mermaid automated emails
+    'mermaid.ai',                              // Mermaid automated emails
+    'email.openai.com',                        // OpenAI automated emails
+    'oracle-mail.com',                         // Oracle automated emails
+    'replies.app.basecamp.com'                 // Basecamp automated emails
   ];
   if (!isNoiseTicket && ticket.requester_id) {
     try {
@@ -1128,6 +1130,15 @@ function processTicket(ticketId, dryRun) {
     }
   }
   
+  // 6. Hardcoded Tickets to Ignore and specific subject phrases
+  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761];
+  if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
+    isNoiseTicket = true;
+  }
+  if (subjLower.indexOf('your service request has been received and will be assigned') !== -1) {
+    isNoiseTicket = true;
+  }
+  
   if (isNoiseTicket) {
     var skipMsg = "Ticket skipped due to noise filtering (Auto-reply/Admin alert).";
     logAiProcessing(ticketId, "skipped", skipMsg, dryRun, null);
@@ -1161,7 +1172,7 @@ function processTicket(ticketId, dryRun) {
     "- proposed_subject: A revised subject line. You MUST include the brackets. If integration is 'None' or 'Unknown', format strictly as '[{Product Area}]: {Issue Type} - {Short Description}'. Otherwise, format strictly as '[{Product Area} - {Integration}]: {Issue Type} - {Short Description}'. (Max 80 chars)\n" +
     "- issue_type: A specific issue category. Use one of: Configuration Issue, Integration Failure, Batch Processing Issue, Installation, Data File Update, SFTP Access Issue, Service Interruption, How-To, Account Management, Feature Request, Notification, Other.\n" +
     "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'.\n" +
-    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]' (e.g. 'DES - Email Append'). If it involves an ERP, you MUST aggressively scan the conversation for specific modules or interfaces (e.g., explicitly look for 'HCM', 'FIN', 'CS', 'Campus Solutions', 'Admin', 'Self Service', 'Classic', 'Fluid', 'EDI'). Format exactly as '[Base ERP] - [Module]' (e.g. 'PeopleSoft - HCM' or 'Banner - Self Service'). If no module is mentioned, output the Base ERP name. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
+    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]' (e.g. 'DES - Email Append'). If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces (e.g., explicitly look for 'HCM', 'FIN', 'Finance', 'CS', 'Campus Solutions', 'Admin', 'Self Service', 'Classic', 'Fluid', 'EDI'). Format exactly as '[Base ERP] - [Module]' (e.g. 'PeopleSoft - HCM', 'PeopleSoft - FIN', 'PeopleSoft - CS', or 'Banner - Self Service'). If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
     "- platform: MUST be the exact Agent-Assigned Platform if provided. Otherwise: Cloud, Windows, Linux, or Other.\n" +
     "- severity: critical, high, medium, or low.\n" +
     "- resolution: solution-provided, fixed-bug, user-error, workaround-provided, escalated, or pending.\n" +
@@ -1531,6 +1542,9 @@ function batchProcessTicketsTrigger() {
 }
 
 function startBatchAiJob(dryRun, triggeredBy, triggeredByEmail, limit, daysBack) {
+  // CRITICAL: Clean up any old execution triggers from previous failed jobs before starting!
+  cleanupBatchTriggers();
+
   var props = PropertiesService.getScriptProperties();
   props.setProperty('AI_Batch_Running', 'true');
   props.setProperty('AI_Batch_DryRun', dryRun ? 'true' : 'false');
@@ -1691,7 +1705,14 @@ function batchProcessTickets(dryRun) {
           subject.indexOf('rejected posting to infdba') !== -1 ||
           subject.indexOf('runner edq: holiday reminder') !== -1 ||
           (subject.indexOf('runner edq') !== -1 && subject.indexOf('celebration') !== -1) ||
+          subject.indexOf('your service request has been received and will be assigned') !== -1 ||
           subject.indexOf('confluence') !== -1) {
+        skippedCount++;
+        continue;
+      }
+      
+      var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761];
+      if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
         skippedCount++;
         continue;
       }
@@ -1969,7 +1990,7 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
  * Reverts the subject, removes ai: tags, and deletes AI Summary notes.
  */
 function revertNoiseTickets() {
-  var ticketsToRevert = [90819, 90789, 90790, 90800, 90802, 90844, 90859, 90861, 91057, 90791, 90855];
+  var ticketsToRevert = [90819, 90789, 90790, 90800, 90802, 90844, 90859, 90861, 91057, 90791, 90855, 90847, 90735, 90738, 90739, 90745, 90746, 90757, 90760, 90761, 90763, 90768, 90972];
   var domain = 'runnertech.freshdesk.com';
   var apiKey = PropertiesService.getScriptProperties().getProperty('FRESHDESK_API_KEY');
   
