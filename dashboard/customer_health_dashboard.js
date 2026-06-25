@@ -3302,11 +3302,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const ticketId = input.value.trim();
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
 
+        const forceReprocess = document.getElementById('manual-force-reprocess') && document.getElementById('manual-force-reprocess').checked;
+
         fetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({
                 action: 'process_single_ticket',
                 ticketId: ticketId,
+                forceReprocess: forceReprocess,
                 triggeredBy: currentUser.name,
                 triggeredByEmail: currentUser.email
             })

@@ -1216,7 +1216,7 @@ function processTicket(ticketId, dryRun) {
     
     if (aiResult.integration) {
       // First strip out known stubborn hallucinations
-      if (aiResult.integration.indexOf('Text Connector') !== -1 || aiResult.integration.indexOf('Guild Core Engine') !== -1) {
+      if (aiResult.integration.indexOf('Guild Core Engine') !== -1) {
         aiResult.integration = 'None';
       }
       
@@ -1235,8 +1235,8 @@ function processTicket(ticketId, dryRun) {
 
     // 3. Scrub Subject Line
     if (aiResult.proposed_subject) {
-      aiResult.proposed_subject = aiResult.proposed_subject.replace(/ - Text Connector/ig, '').replace(/ - Guild Core Engine/ig, '');
-      aiResult.proposed_subject = aiResult.proposed_subject.replace(/Text Connector/ig, 'None').replace(/Guild Core Engine/ig, 'None');
+      aiResult.proposed_subject = aiResult.proposed_subject.replace(/ - Guild Core Engine/ig, '');
+      aiResult.proposed_subject = aiResult.proposed_subject.replace(/Guild Core Engine/ig, 'None');
     }
   }
   // -------------------------------------------------------------
