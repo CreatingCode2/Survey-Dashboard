@@ -1010,7 +1010,7 @@ function processTicket(ticketId, dryRun) {
   var threadLower = (thread || '').toLowerCase().replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ');
   var isNoiseTicket = false;
   
-  // 1. Basic auto-replies, monitoring tools, and system noise
+  // 1. Basic auto-replies, monitoring tools, internal notices, and system noise
   if (subjLower.indexOf('out of office') !== -1 ||
       subjLower.indexOf('automatic reply') !== -1 ||
       subjLower.indexOf('auto-reply') !== -1 ||
@@ -1024,7 +1024,10 @@ function processTicket(ticketId, dryRun) {
       subjLower.indexOf('zoom') !== -1 ||
       subjLower.indexOf('tempo') !== -1 ||
       subjLower.indexOf('basecamp') !== -1 ||
-      subjLower.indexOf('recall:') !== -1) {
+      subjLower.indexOf('recall:') !== -1 ||
+      subjLower.indexOf('rejected posting to infdba') !== -1 ||
+      subjLower.indexOf('runner edq') !== -1 ||
+      subjLower.indexOf('confluence') !== -1) {
     isNoiseTicket = true;
   }
   
@@ -1058,19 +1061,53 @@ function processTicket(ticketId, dryRun) {
     isNoiseTicket = true;
   }
   
-  // 4b. Block out all tickets from @melissa.com (file notification tickets)
+  // 4b. Block tickets from known noise sender emails/domains
+  // Uses the requester data already fetched with ?include=requester
+  var EXCLUDED_SENDER_EMAILS = [
+    'giselle.mazurat@runnertechnologies.com',  // Internal Runner — not customer tickets
+    'lourdes.delfin@runchero.com',             // Known noise sender
+    'listserv@list.unm.edu',                   // Listserv distribution — not customer
+    'samratkapoor620@gmail.com',               // Spam/unsolicited
+    'no-reply@mermaid.ai'                      // Automated tool notification
+  ];
+  var EXCLUDED_SENDER_DOMAINS = [
+    'melissa.com', 'melissadata.com',          // Melissa file notifications
+    'mermaid.ai',                              // Mermaid automated emails
+    'list.unm.edu'                             // UNM listserv domain
+  ];
   if (!isNoiseTicket && ticket.requester_id) {
     try {
-      var contactRes = UrlFetchApp.fetch('https://runnertech.freshdesk.com/api/v2/contacts/' + ticket.requester_id, fdOpts);
-      if (contactRes.getResponseCode() === 200) {
-        var contact = JSON.parse(contactRes.getContentText());
-        var email = (contact.email || '').toLowerCase();
-        if (email.indexOf('melissa.com') !== -1 || email.indexOf('melissadata.com') !== -1) {
-          isNoiseTicket = true;
+      // Use requester data already included in the ticket fetch (no extra API call needed)
+      var requesterEmail = '';
+      if (ticket.requester && ticket.requester.email) {
+        requesterEmail = ticket.requester.email.toLowerCase();
+      } else {
+        // Fallback: fetch contact separately if requester not embedded
+        var contactRes = UrlFetchApp.fetch('https://runnertech.freshdesk.com/api/v2/contacts/' + ticket.requester_id, fdOpts);
+        if (contactRes.getResponseCode() === 200) {
+          requesterEmail = (JSON.parse(contactRes.getContentText()).email || '').toLowerCase();
         }
       }
+      // Check exact email match
+      if (EXCLUDED_SENDER_EMAILS.indexOf(requesterEmail) !== -1) {
+        isNoiseTicket = true;
+      }
+      // Check domain match
+      if (!isNoiseTicket) {
+        var senderDomain = requesterEmail.split('@')[1] || '';
+        for (var sd = 0; sd < EXCLUDED_SENDER_DOMAINS.length; sd++) {
+          if (senderDomain === EXCLUDED_SENDER_DOMAINS[sd] || senderDomain.indexOf(EXCLUDED_SENDER_DOMAINS[sd]) !== -1) {
+            isNoiseTicket = true;
+            break;
+          }
+        }
+      }
+      // Confluence: check if sender domain or subject contains 'confluence' or 'atlassian'
+      if (!isNoiseTicket && (requesterEmail.indexOf('atlassian') !== -1 || requesterEmail.indexOf('confluence') !== -1)) {
+        isNoiseTicket = true;
+      }
     } catch (e) {
-      Logger.log("Failed to fetch contact for ticket " + ticketId + ": " + e.message);
+      Logger.log('Failed to check sender email for ticket ' + ticketId + ': ' + e.message);
     }
   }
   
@@ -1614,7 +1651,7 @@ function batchProcessTickets(dryRun) {
       var tags         = tkts[i].tags || [];
       var customFields = tkts[i].custom_fields || {};
       
-      // 2. Skip Auto-Replies
+      // 2. Skip Auto-Replies, internal notifications, and known noise
       if (subject.indexOf('out of office') !== -1 ||
           subject.indexOf('automatic reply') !== -1 ||
           subject.indexOf('auto-reply') !== -1 ||
@@ -1624,7 +1661,10 @@ function batchProcessTickets(dryRun) {
           subject.indexOf('uptime robot') !== -1 ||
           subject.indexOf('zoom') !== -1 ||
           subject.indexOf('tempo') !== -1 ||
-          subject.indexOf('basecamp') !== -1) {
+          subject.indexOf('basecamp') !== -1 ||
+          subject.indexOf('rejected posting to infdba') !== -1 ||
+          subject.indexOf('runner edq') !== -1 ||
+          subject.indexOf('confluence') !== -1) {
         skippedCount++;
         continue;
       }
@@ -1791,7 +1831,50 @@ function retryFailedTicketsJob(triggeredBy, triggeredByEmail) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Sends a summary email when a batch job fully completes.
+// ONE-TIME CLEANUP: Removes incorrectly processed noise tickets
+// from both Ticket_AI_Data and AI_Processing_Log sheets.
+// Run once from Apps Script editor after redeployment.
+// ─────────────────────────────────────────────────────────────
+function removeNoiseTicketsFromSheet() {
+  var TICKETS_TO_REMOVE = ['90819', '90789', '90790', '90800', '90802', '90844', '90859', '90861', '91057'];
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var removedAiData = 0;
+  var removedLog    = 0;
+
+  // ── Clean Ticket_AI_Data ─────────────────────────────────────
+  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
+  if (aiSheet) {
+    var aiData = aiSheet.getDataRange().getValues();
+    // Iterate from bottom up so row deletions don't shift indices
+    for (var i = aiData.length - 1; i >= 1; i--) {
+      var tid = String(aiData[i][0]).trim();
+      if (TICKETS_TO_REMOVE.indexOf(tid) !== -1) {
+        aiSheet.deleteRow(i + 1); // sheet rows are 1-indexed
+        removedAiData++;
+      }
+    }
+  }
+
+  // ── Clean AI_Processing_Log ──────────────────────────────────
+  var logSheet = ss.getSheetByName('AI_Processing_Log');
+  if (logSheet) {
+    var logData = logSheet.getDataRange().getValues();
+    for (var j = logData.length - 1; j >= 1; j--) {
+      var ltid = String(logData[j][1]).trim(); // column B = ticket_id
+      if (TICKETS_TO_REMOVE.indexOf(ltid) !== -1) {
+        logSheet.deleteRow(j + 1);
+        removedLog++;
+      }
+    }
+  }
+
+  var msg = 'Cleanup complete. Removed ' + removedAiData + ' rows from Ticket_AI_Data and ' + removedLog + ' rows from AI_Processing_Log.';
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
+}
+
+
 // Shows processed / failed / skipped breakdown + partial-success
 // note if failures occurred.
 // ─────────────────────────────────────────────────────────────

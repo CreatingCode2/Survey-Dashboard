@@ -2866,6 +2866,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 window.renderAiCharts(trendData, null);
                 window.renderTicketBrowser(trendData);
+                window.renderAiReviewQueue(trendData);
             }
         } catch(e) {
             console.error('Error fetching AI Ticket Trends:', e);
@@ -3110,6 +3111,59 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="px-3 py-2 whitespace-nowrap text-sm">${label}</td>
                     <td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-xs font-semibold ${sevColor}">${r.severity || '—'}</span></td>
                     <td class="px-3 py-2 text-center">${sentIcon}</td>
+                </tr>
+            `;
+        });
+    };
+
+    // ── Render the AI Classification Review Queue ─────────────────────────────
+    // Flags tickets that need human review: issue_type=Other, critical severity,
+    // or resolution=pending.
+    window.renderAiReviewQueue = function(data) {
+        const container = document.getElementById('ai-health-review-body');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!data || data.length === 0) {
+            container.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-gray-400 text-xs">No data yet. Run a batch job first.</td></tr>';
+            return;
+        }
+
+        const flagged = data.filter(r => {
+            const issueType  = (r.issue_type  || '').toLowerCase().trim();
+            const severity   = (r.severity    || '').toLowerCase().trim();
+            const resolution = (r.resolution  || '').toLowerCase().trim();
+            return issueType === 'other' || severity === 'critical' || resolution === 'pending';
+        });
+
+        if (flagged.length === 0) {
+            container.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-green-600 font-medium text-sm">✅ No tickets flagged for review.</td></tr>';
+            return;
+        }
+
+        flagged.forEach(r => {
+            const fdUrl      = `https://runnertech.freshdesk.com/a/tickets/${r.ticket_id}`;
+            const issueType  = (r.issue_type  || '—').trim();
+            const severity   = (r.severity    || '—').trim();
+            const resolution = (r.resolution  || '—').trim();
+
+            const flags = [];
+            if (issueType.toLowerCase() === 'other') flags.push('Unclassified (Other)');
+            if (severity.toLowerCase() === 'critical') flags.push('Critical Severity');
+            if (resolution.toLowerCase() === 'pending') flags.push('Resolution Pending');
+
+            const sevColor = severity === 'critical' ? 'text-red-700 font-bold' : 'text-gray-700';
+
+            container.innerHTML += `
+                <tr class="hover:bg-amber-50 cursor-pointer" onclick="window.open('${fdUrl}','_blank')">
+                    <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
+                        <a href="${fdUrl}" target="_blank" class="hover:underline">#${r.ticket_id}</a>
+                    </td>
+                    <td class="px-3 py-2 max-w-xs truncate text-sm">${r.proposed_subject || '—'}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm">${r.integration || '—'}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm ${sevColor}">${severity}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm">${resolution}</td>
+                    <td class="px-3 py-2 text-xs text-amber-700 font-medium">${flags.join(', ')}</td>
                 </tr>
             `;
         });
