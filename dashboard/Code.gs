@@ -1938,3 +1938,89 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
     Logger.log('Could not send batch completion email: ' + emailErr.message);
   }
 }
+
+/**
+ * Utility to mass-remove AI modifications from specific noise tickets.
+ * Reverts the subject, removes ai: tags, and deletes AI Summary notes.
+ */
+function revertNoiseTickets() {
+  var ticketsToRevert = [90819, 90789, 90790, 90800, 90802, 90844, 90859, 90861, 91057, 90791, 90855];
+  var domain = 'runnertech.freshdesk.com';
+  var apiKey = PropertiesService.getScriptProperties().getProperty('FRESHDESK_API_KEY');
+  
+  if (!apiKey) {
+    console.error("No API key found.");
+    return;
+  }
+  
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = {
+    headers: { 'Authorization': authHeader },
+    muteHttpExceptions: true
+  };
+  
+  var logMessages = [];
+  
+  for (var i = 0; i < ticketsToRevert.length; i++) {
+    var ticketId = ticketsToRevert[i];
+    
+    // 1. Fetch ticket
+    var ticketRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, fdOpts);
+    if (ticketRes.getResponseCode() !== 200) {
+      logMessages.push('Ticket ' + ticketId + ': Not found or error fetching.');
+      continue;
+    }
+    var ticket = JSON.parse(ticketRes.getContentText());
+    
+    // 2. Clean subject (remove AI bracket prefixes like [Critical]: or [Other]:)
+    var cleanSubject = ticket.subject.replace(/^\[.*?\]:\s*/i, '');
+    
+    // 3. Clean tags (remove anything starting with 'ai:')
+    var currentTags = ticket.tags || [];
+    var newTags = [];
+    for (var t = 0; t < currentTags.length; t++) {
+      if (currentTags[t].indexOf('ai:') !== 0) {
+        newTags.push(currentTags[t]);
+      }
+    }
+    
+    // 4. Update ticket (subject and tags)
+    var updatePayload = {
+      subject: cleanSubject,
+      tags: newTags
+    };
+    var updateOptions = {
+      method: 'put',
+      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+      payload: JSON.stringify(updatePayload),
+      muteHttpExceptions: true
+    };
+    var updateRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, updateOptions);
+    var updateSuccess = updateRes.getResponseCode() === 200;
+    
+    // 5. Delete AI conversations (Notes)
+    var convUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId + '/conversations';
+    var convRes = UrlFetchApp.fetch(convUrl, fdOpts);
+    var notesDeleted = 0;
+    if (convRes.getResponseCode() === 200) {
+      var conversations = JSON.parse(convRes.getContentText());
+      for (var j = 0; j < conversations.length; j++) {
+        var conv = conversations[j];
+        if (conv.private && conv.body_text && conv.body_text.indexOf('AI Classification Summary') !== -1) {
+          // Delete this conversation
+          var delOpts = {
+            method: 'delete',
+            headers: { 'Authorization': authHeader },
+            muteHttpExceptions: true
+          };
+          UrlFetchApp.fetch('https://' + domain + '/api/v2/conversations/' + conv.id, delOpts);
+          notesDeleted++;
+        }
+      }
+    }
+    
+    logMessages.push('Ticket ' + ticketId + ': Subject reverted (' + updateSuccess + '), ' + (currentTags.length - newTags.length) + ' tags removed, ' + notesDeleted + ' notes deleted.');
+  }
+  
+  console.log("Cleanup Results:\n" + logMessages.join('\n'));
+}
