@@ -3192,9 +3192,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (severity.toLowerCase() === 'critical') flags.push('Critical Severity');
             if (resolution.toLowerCase() === 'pending') flags.push('Resolution Pending');
 
-            const sevColor = severity === 'critical' ? 'text-red-700 font-bold' : 'text-gray-700';
+                    let sevColor = severity === 'critical' ? 'text-red-700 font-bold' : 'text-gray-700';
 
-            container.innerHTML += `
+                    container.innerHTML += `
                 <tr class="hover:bg-amber-50 cursor-pointer" onclick="window.open('${fdUrl}','_blank')">
                     <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
                         <a href="${fdUrl}" target="_blank" class="hover:underline">#${r.ticket_id}</a>
@@ -3210,6 +3210,18 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // ── Batch job controls ────────────────────────────────────────────────────
+    window.toggleCustomDates = function() {
+        const select = document.getElementById('ai-batch-timeframe');
+        const customDiv = document.getElementById('ai-batch-custom-dates');
+        if (select && customDiv) {
+            if (select.value === 'custom') {
+                customDiv.classList.remove('hidden');
+            } else {
+                customDiv.classList.add('hidden');
+            }
+        }
+    };
+
     window.startAiBatch = function() {
         if (!isLoggedIn) {
             alert('You must be logged in to run a batch job. Batch jobs are logged by user.');
@@ -3221,15 +3233,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnStop        = document.getElementById('stop-ai-batch-btn');
         const statusContainer = document.getElementById('ai-status-container');
         const statusText     = document.getElementById('ai-status-text');
+        
+        // Grab values from UI
         const dryRun         = document.getElementById('ai-dry-run') && document.getElementById('ai-dry-run').checked;
+        const overwrite      = document.getElementById('ai-overwrite') && document.getElementById('ai-overwrite').checked;
         const limitInput     = document.getElementById('ai-batch-limit');
         const limit          = limitInput ? parseInt(limitInput.value, 10) || 0 : 0;
+        
+        const timeframeInput = document.getElementById('ai-batch-timeframe');
+        let daysBack = 365;
+        let startDate = null;
+        let endDate = null;
+        
+        if (timeframeInput) {
+            if (timeframeInput.value === 'custom') {
+                startDate = document.getElementById('ai-batch-start-date').value;
+                endDate = document.getElementById('ai-batch-end-date').value;
+                if (!startDate) { alert('Please select a start date for the custom timeframe.'); return; }
+                daysBack = 0;
+            } else {
+                daysBack = parseInt(timeframeInput.value, 10);
+            }
+        }
 
         btnStart.disabled = true;
-        btnStart.textContent = 'Starting...';
+        btnStart.innerHTML = '<span>⏳</span> Starting...';
 
-        const modeLabel  = dryRun ? '📝 Dry-Run Audit (no writes to Freshdesk)' : '⚡ Live Run (WILL write to Freshdesk)';
-        const limitLabel = limit > 0 ? ` (Limit: ${limit} tickets)` : '';
+        const modeLabel  = dryRun ? '📝 Dry-Run Audit' : '⚡ Live Run';
+        const limitLabel = limit > 0 ? ` (Limit: ${limit})` : '';
         if (statusText) statusText.textContent = `Batch job running — ${modeLabel}${limitLabel}...`;
 
         fetch(SHEET_URL, {
@@ -3237,7 +3268,11 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({
                 action: 'start_batch_ai',
                 dryRun: dryRun,
+                overwrite: overwrite,
                 limit: limit,
+                daysBack: daysBack,
+                startDate: startDate,
+                endDate: endDate,
                 triggeredBy: currentUser.name,
                 triggeredByEmail: currentUser.email
             })
@@ -3262,9 +3297,56 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnStart       = document.getElementById('start-ai-batch-btn');
         const btnStop        = document.getElementById('stop-ai-batch-btn');
         const statusContainer = document.getElementById('ai-status-container');
-        if (btnStart)  { btnStart.classList.remove('hidden'); btnStart.disabled = false; btnStart.textContent = '▶️ Start Batch Job'; }
+        if (btnStart)  { btnStart.classList.remove('hidden'); btnStart.disabled = false; btnStart.textContent = '▶️ Start Batch'; }
         if (btnStop)   btnStop.classList.add('hidden');
         if (statusContainer) statusContainer.classList.add('hidden');
+    };
+
+    window.runBatchAudit = function() {
+        if (!isLoggedIn) { alert('You must be logged in to run the audit.'); return; }
+        
+        const timeframeInput = document.getElementById('ai-batch-timeframe');
+        let daysBack = 365;
+        let startDate = null;
+        let endDate = null;
+        
+        if (timeframeInput) {
+            if (timeframeInput.value === 'custom') {
+                startDate = document.getElementById('ai-batch-start-date').value;
+                endDate = document.getElementById('ai-batch-end-date').value;
+                if (!startDate) { alert('Please select a start date for the custom timeframe.'); return; }
+                daysBack = 0;
+            } else {
+                daysBack = parseInt(timeframeInput.value, 10);
+            }
+        }
+
+        const btnAudit = document.getElementById('audit-ai-batch-btn');
+        const origText = btnAudit.innerHTML;
+        btnAudit.disabled = true; 
+        btnAudit.innerHTML = '⏳ Auditing...';
+
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'run_batch_audit',
+                daysBack: daysBack,
+                startDate: startDate,
+                endDate: endDate,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            alert(data.message || 'Audit complete! Open your Google Sheet and check the "Audit_Report" tab.');
+            btnAudit.disabled = false;
+            btnAudit.innerHTML = origText;
+        })
+        .catch(err => {
+            alert('Error running audit: ' + err.message);
+            btnAudit.disabled = false;
+            btnAudit.innerHTML = origText;
+        });
     };
 
     function pollAiBatchStatus() {
@@ -3290,6 +3372,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     clearInterval(aiPollingInterval);
                     window.stopAiBatch();
                     window.fetchAiData(); // Refresh logs and charts
+                    
+                    if (batchInfo.ticketsProcessed === 0) {
+                        alert("Batch completed: 0 tickets were found to process in the specified timeframe.");
+                    }
                 }
             })
             .catch(err => { console.error('Error polling AI status:', err); });

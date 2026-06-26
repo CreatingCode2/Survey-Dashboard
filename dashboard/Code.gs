@@ -260,10 +260,26 @@ function doPost(e) {
         return jsonResponse('error', 'Access denied. Only authorized admins can run batch jobs. Contact Misty Wilmore.');
       }
       var dryRun = postData.dryRun === true;
+      var overwrite = postData.overwrite === true;
       var limit = postData.limit || 0;
+      var daysBack = postData.daysBack || 365;
+      var startDate = postData.startDate || '';
+      var endDate = postData.endDate || '';
       var triggeredBy = postData.triggeredBy || 'Unknown';
-      startBatchAiJob(dryRun, triggeredBy, triggeredByEmail, limit);
-      return jsonResponse('success', 'Batch job started (dryRun: ' + dryRun + ', by: ' + triggeredBy + ', limit: ' + limit + ').');
+      startBatchAiJob(dryRun, overwrite, triggeredBy, triggeredByEmail, limit, daysBack, startDate, endDate);
+      return jsonResponse('success', 'Batch job started (dryRun: ' + dryRun + ', overwrite: ' + overwrite + ', by: ' + triggeredBy + ', limit: ' + limit + ').');
+    }
+    
+    if (action === 'run_batch_audit') {
+      var auditCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(auditCallerEmail)) {
+        return jsonResponse('error', 'Access denied.');
+      }
+      var daysBack = postData.daysBack || 365;
+      var startDate = postData.startDate || '';
+      var endDate = postData.endDate || '';
+      runBatchAudit(daysBack, startDate, endDate);
+      return jsonResponse('success', 'Audit complete. Check the Audit_Report tab.');
     }
     
     if (action === 'stop_batch_ai') {
@@ -1361,12 +1377,17 @@ function logAiProcessing(ticketId, status, actionOrError, dryRun, aiResult) {
     summary = (aiResult.summary || '').substring(0, 500);
   }
 
+  var actionStr;
+  if (status === 'success') actionStr = actionOrError;
+  else if (status === 'skipped') actionStr = 'skipped';
+  else actionStr = 'processing_failed';
+
   sheet.appendRow([
     new Date().toISOString(),
     ticketId,
-    (status === 'success' ? actionOrError : 'processing_failed') + ' [by: ' + triggeredBy + ']',
+    actionStr + ' [by: ' + triggeredBy + ']',
     status,
-    status === 'error' ? actionOrError : '',
+    (status === 'error' || status === 'skipped') ? actionOrError : '',
     dryRun ? 'TRUE' : 'FALSE',
     proposedSubject,
     summary
@@ -1586,19 +1607,22 @@ function batchProcessTicketsTrigger() {
   }
 }
 
-function startBatchAiJob(dryRun, triggeredBy, triggeredByEmail, limit, daysBack) {
+function startBatchAiJob(dryRun, overwrite, triggeredBy, triggeredByEmail, limit, daysBack, startDate, endDate) {
   // CRITICAL: Clean up any old execution triggers from previous failed jobs before starting!
   cleanupBatchTriggers();
 
   var props = PropertiesService.getScriptProperties();
   props.setProperty('AI_Batch_Running', 'true');
   props.setProperty('AI_Batch_DryRun', dryRun ? 'true' : 'false');
+  props.setProperty('AI_Batch_Overwrite', overwrite ? 'true' : 'false');
   props.setProperty('AI_Batch_Page', '1');
   props.setProperty('AI_Batch_Count', '0');
   props.setProperty('AI_Batch_FailCount', '0');    // NEW: track failures
   props.setProperty('AI_Batch_SkipCount', '0');    // NEW: track skips
   props.setProperty('AI_Batch_Limit', (limit || 0).toString());
   props.setProperty('AI_Batch_DaysBack', (daysBack || 365).toString());
+  props.setProperty('AI_Batch_StartDate', startDate || '');
+  props.setProperty('AI_Batch_EndDate', endDate || '');
   props.setProperty('AI_Batch_TriggeredBy', triggeredBy || 'Unknown');
   props.setProperty('AI_Batch_TriggeredByEmail', triggeredByEmail || '');
   props.setProperty('AI_Batch_StartTime', new Date().toISOString()); // NEW
@@ -1653,231 +1677,8 @@ function getBatchAiStatus() {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
-// ─────────────────────────────────────────────────────────────────────────
-// FULL YEAR AUDIT: Scans every Freshdesk ticket from 2026 and compares
-// against what's been AI-processed in the Google Sheet.
-// Creates/replaces an "Audit_2026" tab with full results.
-// Run from Apps Script editor. READ ONLY - modifies nothing in Freshdesk.
-// ─────────────────────────────────────────────────────────────────────────
-function fullYearAudit() {
-  var props      = PropertiesService.getScriptProperties();
-  var apiKey     = props.getProperty('Freshdesk_Api_Key');
-  var domain     = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var cutoffDate = new Date('2026-01-01T00:00:00Z');
 
-  // Build set of ticket IDs already in the Ticket_AI_Data sheet
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
-  var processedIds = {};
-  if (aiSheet) {
-    var aiData = aiSheet.getDataRange().getValues();
-    for (var r = 1; r < aiData.length; r++) {
-      var tid = String(aiData[r][0]).trim();
-      if (tid) processedIds[tid] = true;
-    }
-  }
-  Logger.log('Tickets in Ticket_AI_Data sheet: ' + Object.keys(processedIds).length);
 
-  // Scan Freshdesk
-  var allTickets = [];
-  var page = 1;
-  var auditUpdatedSince = cutoffDate.toISOString();
-  while (page <= 50) { // safety cap at 50 pages = 1500 tickets
-    var url = 'https://' + domain + '/api/v2/tickets?updated_since=' + auditUpdatedSince + '&order_by=created_at&order_type=desc&per_page=30&page=' + page;
-    var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) { Logger.log('Fetch failed at page ' + page); break; }
-    var tkts = JSON.parse(res.getContentText());
-    if (tkts.length === 0) break;
-
-    var hitCutoff = false;
-    for (var i = 0; i < tkts.length; i++) {
-      var created = new Date(tkts[i].created_at);
-      if (created < cutoffDate) { hitCutoff = true; break; }
-      allTickets.push(tkts[i]);
-    }
-    if (hitCutoff) break;
-    page++;
-    Utilities.sleep(300); // stay within rate limits
-  }
-
-  Logger.log('Total 2026 tickets found in Freshdesk: ' + allTickets.length);
-
-  // Categorize each ticket
-  var EXCLUDED_LOCAL  = ['Spam', 'Runner Internal'];
-  var HARDCODED_LOCAL = [90745, 90746, 90757, 90760, 90761, 90847];
-  var NOISE_PHRASES   = [
-    'out of office','automatic reply','auto-reply','vacation','autoreply',
-    'oracle: security notification','uptime robot','zoom','tempo','basecamp',
-    'rejected posting to infdba','runner edq: holiday reminder','confluence',
-    'your service request has been received and will be assigned',
-    'recall:', 'passcode', 'new voicemail', 'unused transaction pool expires',
-    'melissa product news and updates', 'melissa data subscription update available',
-    'file is complete and updated', 'completed file posted on ftp', 'transactions low'
-  ];
-
-  var rows = [['Ticket #','Subject','Status','Type','Created','AI Tagged in FD','In Sheet','Category']];
-  var counts = { open:0, excludedType:0, noise:0, hardcoded:0, aiTagged:0, inSheet:0, eligible:0 };
-
-  for (var j = 0; j < allTickets.length; j++) {
-    var t       = allTickets[j];
-    var subject = (t.subject || '').toLowerCase();
-    var tags    = t.tags || [];
-    var cf      = t.custom_fields || {};
-    var statusLabel = {1:'Open',2:'Pending',3:'Resolved',4:'Resolved',5:'Closed'}[t.status] || t.status;
-    var inSheet = processedIds[String(t.id)] ? 'YES' : 'NO';
-
-    var aiTagged = !!cf.cf_ai_summary_notes;
-    for (var tg = 0; tg < tags.length; tg++) {
-      if (tags[tg].toLowerCase().indexOf('ai:') === 0) { aiTagged = true; break; }
-    }
-
-    var category = '';
-    if (t.status !== 4 && t.status !== 5) {
-      category = 'OPEN/PENDING'; counts.open++;
-    } else if (EXCLUDED_LOCAL.indexOf(t.type || '') !== -1) {
-      category = 'EXCLUDED TYPE'; counts.excludedType++;
-    } else {
-      var isNoise = false;
-      for (var n = 0; n < NOISE_PHRASES.length; n++) {
-        if (subject.indexOf(NOISE_PHRASES[n]) !== -1) { isNoise = true; break; }
-      }
-      if (subject.indexOf('runner edq') !== -1 && subject.indexOf('celebration') !== -1) isNoise = true;
-      if (isNoise) {
-        category = 'NOISE FILTER'; counts.noise++;
-      } else if (HARDCODED_LOCAL.indexOf(Number(t.id)) !== -1) {
-        category = 'HARDCODED IGNORE'; counts.hardcoded++;
-      } else if (aiTagged) {
-        category = 'ALREADY PROCESSED (ai: tag)'; counts.aiTagged++;
-        if (inSheet === 'NO') category += ' - MISSING FROM SHEET';
-      } else {
-        category = 'ELIGIBLE - NOT YET PROCESSED'; counts.eligible++;
-      }
-    }
-    if (inSheet === 'YES') counts.inSheet++;
-
-    rows.push([t.id, t.subject, statusLabel, t.type || '', t.created_at, aiTagged ? 'YES' : 'NO', inSheet, category]);
-  }
-
-  // Summary rows at top
-  var summary = [
-    ['=== AUDIT SUMMARY ===','','','','','','',''],
-    ['Total 2026 tickets in Freshdesk:', allTickets.length,'','','','','',''],
-    ['Tickets in Ticket_AI_Data sheet:', Object.keys(processedIds).length,'','','','','',''],
-    ['','','','','','','',''],
-    ['OPEN/PENDING (not yet closeable):',  counts.open,'','','','','',''],
-    ['Excluded type (Spam/Internal):',     counts.excludedType,'','','','','',''],
-    ['Noise filter (auto-email/internal):',counts.noise,'','','','','',''],
-    ['Hardcoded ignore list:',             counts.hardcoded,'','','','','',''],
-    ['Already processed (ai: tags in FD):',counts.aiTagged,'','','','','',''],
-    ['ELIGIBLE - not yet processed:',      counts.eligible,'','','','','',''],
-    ['','','','','','','',''],
-    ['=== DETAIL (one row per ticket) ===','','','','','','','']
-  ];
-
-  // Write to Audit_2026 sheet
-  var auditSheet = ss.getSheetByName('Audit_2026');
-  if (auditSheet) ss.deleteSheet(auditSheet);
-  auditSheet = ss.insertSheet('Audit_2026');
-  auditSheet.getRange(1, 1, summary.length, 8).setValues(summary);
-  auditSheet.getRange(summary.length + 1, 1, rows.length, 8).setValues(rows);
-  auditSheet.autoResizeColumns(1, 8);
-
-  Logger.log('Audit complete. Open the Audit_2026 tab in your Google Sheet.');
-  Logger.log('SUMMARY: ' + allTickets.length + ' total | ' + counts.open + ' open | ' +
-             counts.aiTagged + ' already processed | ' + counts.eligible + ' eligible');
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// DIAGNOSTIC: Scans tickets and reports skip-reason breakdown.
-// Run from Apps Script editor. Does NOT process or modify anything.
-// Results appear in the execution log.
-// ─────────────────────────────────────────────────────────────────────────
-function diagnosticBatchScan() {
-  var props      = PropertiesService.getScriptProperties();
-  var apiKey     = props.getProperty('Freshdesk_Api_Key');
-  var domain     = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var daysBack   = 365;
-  var maxPages   = 15; // 15 pages x 30 tickets = up to 450 tickets scanned
-
-  var counts = {
-    openOrPending: 0, excludedType: 0, noiseSubject: 0,
-    hardcodedIgnore: 0, alreadyProcessed: 0, eligible: 0, total: 0
-  };
-
-  var EXCLUDED_LOCAL   = ['Spam', 'Runner Internal'];
-  var HARDCODED_LOCAL  = [90745, 90746, 90757, 90760, 90761, 90847];
-  var NOISE_PHRASES    = [
-    'out of office','automatic reply','auto-reply','vacation','autoreply',
-    'oracle: security notification','uptime robot','zoom','tempo','basecamp',
-    'rejected posting to infdba','runner edq: holiday reminder','confluence',
-    'your service request has been received and will be assigned',
-    'recall:', 'passcode'
-  ];
-
-  var d = new Date();
-  d.setDate(d.getDate() - daysBack);
-  var updatedSince = d.toISOString();
-
-  for (var page = 1; page <= maxPages; page++) {
-    var url = 'https://' + domain + '/api/v2/tickets?updated_since=' + updatedSince + '&order_by=created_at&order_type=desc&per_page=30&page=' + page;
-    var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) { Logger.log('Page ' + page + ' failed: ' + res.getResponseCode()); break; }
-    var tkts = JSON.parse(res.getContentText());
-    if (tkts.length === 0) { Logger.log('No more tickets at page ' + page); break; }
-
-    for (var i = 0; i < tkts.length; i++) {
-      counts.total++;
-      var t          = tkts[i];
-      var ageDays    = (new Date().getTime() - new Date(t.created_at).getTime()) / (1000 * 3600 * 24);
-
-      if (ageDays > daysBack) {
-        Logger.log('Hit ' + daysBack + '-day limit at page ' + page + ', ticket #' + t.id);
-        logDiagnosticSummary(counts);
-        return;
-      }
-
-      var subject = (t.subject || '').toLowerCase();
-      var tags    = t.tags || [];
-      var cf      = t.custom_fields || {};
-
-      if (t.status !== 4 && t.status !== 5)                          { counts.openOrPending++;    continue; }
-      if (EXCLUDED_LOCAL.indexOf(t.type || '') !== -1)                { counts.excludedType++;     continue; }
-
-      var isNoise = false;
-      for (var n = 0; n < NOISE_PHRASES.length; n++) {
-        if (subject.indexOf(NOISE_PHRASES[n]) !== -1) { isNoise = true; break; }
-      }
-      if (subject.indexOf('runner edq') !== -1 && subject.indexOf('celebration') !== -1) isNoise = true;
-      if (isNoise)                                                     { counts.noiseSubject++;     continue; }
-      if (HARDCODED_LOCAL.indexOf(Number(t.id)) !== -1)               { counts.hardcodedIgnore++;  continue; }
-
-      var done = !!cf.cf_ai_summary_notes;
-      for (var tg = 0; tg < tags.length; tg++) {
-        if (tags[tg].toLowerCase().indexOf('ai:') === 0) { done = true; break; }
-      }
-      if (done) { counts.alreadyProcessed++; continue; }
-
-      counts.eligible++;
-      Logger.log('ELIGIBLE: #' + t.id + ' | ' + t.subject);
-    }
-  }
-  logDiagnosticSummary(counts);
-}
-
-function logDiagnosticSummary(counts) {
-  Logger.log('========== DIAGNOSTIC SCAN RESULTS ==========');
-  Logger.log('Total scanned:            ' + counts.total);
-  Logger.log('  Open/Pending (skipped): ' + counts.openOrPending);
-  Logger.log('  Excluded type:          ' + counts.excludedType);
-  Logger.log('  Noise subject filter:   ' + counts.noiseSubject);
-  Logger.log('  Hardcoded ignore list:  ' + counts.hardcodedIgnore);
-  Logger.log('  Already AI-processed:   ' + counts.alreadyProcessed);
-  Logger.log('  ELIGIBLE (unprocessed): ' + counts.eligible);
-  Logger.log('  (See ELIGIBLE lines above for ticket IDs)');
-  Logger.log('=============================================');
-}
 
 function batchProcessTickets(dryRun) {
   var props = PropertiesService.getScriptProperties();
@@ -2181,11 +1982,90 @@ function retryFailedTicketsJob(triggeredBy, triggeredByEmail) {
   return failedTicketIds.length;
 }
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// RUN BATCH AUDIT: Scans tickets in the given timeframe without processing
+// them. Creates/replaces an "Audit_Report" tab with full results.
+// ─────────────────────────────────────────────────────────────────────────
+function runBatchAudit(daysBack, startDateStr, endDateStr) {
+  var props      = PropertiesService.getScriptProperties();
+  var apiKey     = props.getProperty('Freshdesk_Api_Key');
+  var domain     = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  
+  var updatedSince;
+  if (daysBack === 0 && startDateStr) {
+    var d = new Date(startDateStr);
+    updatedSince = d.toISOString();
+  } else {
+    var d = new Date();
+    d.setDate(d.getDate() - (daysBack || 365));
+    updatedSince = d.toISOString();
+  }
+
+  // Build set of ticket IDs already in the Ticket_AI_Data sheet
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
+  var processedIds = {};
+  if (aiSheet) {
+    var data = aiSheet.getDataRange().getValues();
+    for (var r = 1; r < data.length; r++) {
+      processedIds[String(data[r][0]).trim()] = true;
+    }
+  }
+
+  var auditSheet = ss.getSheetByName('Audit_Report');
+  if (!auditSheet) {
+    auditSheet = ss.insertSheet('Audit_Report');
+  } else {
+    auditSheet.clear();
+  }
+  
+  auditSheet.appendRow(['Ticket #', 'Subject', 'Status', 'Type', 'Created', 'Category', 'Notes']);
+  auditSheet.getRange('A1:G1').setFontWeight('bold');
+
+  var page = 1;
+  var totalChecked = 0;
+  
+  // Categorization counts
+  var stats = {
+    eligible: 0,
+    alreadyProcessed: 0,
+    openPending: 0,
+    excludedType: 0,
+    noise: 0
+  };
+
+  while (true) {
+    var url = 'https://' + domain + '/api/v2/tickets?updated_since=' + updatedSince + '&order_by=created_at&order_type=desc&per_page=100&page=' + page;
+    var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) break;
+    var tkts = JSON.parse(res.getContentText());
+    if (tkts.length === 0) break;
+    
+    var rows = [];
+    tkts.forEach(function(t) {
+      var cat = 'ELIGIBLE';
+      var notes = '';
+      
+      if (t.status !== 4 && t.status !== 5) { cat = 'OPEN/PENDING'; stats.openPending++; }
+      else if (EXCLUDED_TICKET_TYPES.indexOf(t.type || '') !== -1) { cat = 'EXCLUDED TYPE'; stats.excludedType++; }
+      else if (processedIds[String(t.id)]) { cat = 'ALREADY PROCESSED'; stats.alreadyProcessed++; }
+      else { stats.eligible++; }
+      
+      rows.push([t.id, t.subject, t.status, t.type, t.created_at, cat, notes]);
+    });
+    
+    if (rows.length > 0) auditSheet.getRange(auditSheet.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
+    page++;
+    Utilities.sleep(500);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // ONE-TIME CLEANUP: Removes incorrectly processed noise tickets
 // from both Ticket_AI_Data and AI_Processing_Log sheets.
 // Run once from Apps Script editor after redeployment.
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 function removeNoiseTicketsFromSheet() {
   var TICKETS_TO_REMOVE = ['90819', '90789', '90790', '90800', '90802', '90844', '90859', '90861', '91057', '90791', '90855', '90847', '90735', '90738', '90739', '90745', '90746', '90757', '90760', '90761', '90763', '90768', '90972'];
 
