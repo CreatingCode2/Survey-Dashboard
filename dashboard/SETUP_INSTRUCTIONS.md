@@ -535,10 +535,10 @@ You can now manage users and roles directly from the dashboard UI!
 2. Click the **Manage Users** button.
 3. Add the user, give them the `admin` role, and click **Save Changes**.
 
-*(Fallback):* To hardcode a permanent admin, open `Config.gs` and add their email to `BATCH_ADMIN_EMAILS`, then redeploy.
+*(Fallback):* To hardcode a permanent admin, open `Code.gs` and add their email to `BATCH_ADMIN_EMAILS`, then redeploy.
 
 ### Adding New Excluded Ticket Types
-To prevent the AI from processing certain Freshdesk ticket types, open `Config.gs` and add to:
+To prevent the AI from processing certain Freshdesk ticket types, open `Code.gs` and add to:
 ```javascript
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal', 'YourNewType'];
 ```
@@ -556,7 +556,7 @@ Then redeploy.
 - **Never** accumulate multiple AI edits without committing. One logical change = one commit.
 
 ### Rule 2 - Never Touch Batch Logic Without a Diff First
-- Before modifying anything in `AiService.gs` regarding batch triggers, run a `git diff`.
+- Before modifying anything in `Code.gs` regarding batch triggers, run a `git diff`.
 - Confirm `MAX_EXECUTION_TIME_MS` is still defined inside `batchProcessTickets()` after any edit.
 - Confirm `cleanupBatchTriggers()` still exists and is called from `batchProcessTickets()` on job completion.
 
@@ -580,11 +580,11 @@ Then redeploy.
 The following variables/functions are critical to batch operation. Never delete them:
 | Variable / Function | File | Purpose |
 |---|---|---|
-| `MAX_EXECUTION_TIME_MS` | `AiService.gs` | GAS 6-min execution guard |
-| `batchProcessTicketsTrigger()` | `AiService.gs` | Time-based trigger entry point |
-| `cleanupBatchTriggers()` | `AiService.gs` | Removes orphaned triggers on job complete |
-| `BATCH_ADMIN_EMAILS` | `Config.gs` | Hardcoded fallback for admin access |
-| `EXCLUDED_TICKET_TYPES` | `Config.gs` | Noise filter for batch |
+| `MAX_EXECUTION_TIME_MS` | `Code.gs` | GAS 6-min execution guard |
+| `batchProcessTicketsTrigger()` | `Code.gs` | Time-based trigger entry point |
+| `cleanupBatchTriggers()` | `Code.gs` | Removes orphaned triggers on job complete |
+| `BATCH_ADMIN_EMAILS` | `Code.gs` | Hardcoded fallback for admin access |
+| `EXCLUDED_TICKET_TYPES` | `Code.gs` | Noise filter for batch |
 
 ### Rule 7 - After Any Deployment, Verify in Apps Script
 After copying the `.gs` files to the Apps Script editor:

@@ -946,40 +946,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let isLoggedIn = false;
-    let currentUser = { id: 'guest', name: 'Guest User', email: '', role: 'viewer' };
+    let currentUser = { id: 'guest', name: 'Guest User', email: '', role: 'viewer', canAccessData: false, canAccessIntel: false };
 
     window.promptLogin = function () {
         const modal = document.getElementById('login-modal');
-        document.getElementById('login-name-input').value = '';
-        document.getElementById('login-email-input').value = '';
-        document.getElementById('login-error').classList.add('hidden');
-        document.getElementById('login-success').classList.add('hidden');
-        document.getElementById('login-step-1').classList.remove('hidden');
-        document.getElementById('login-step-2').classList.add('hidden');
-        document.getElementById('login-primary-btn').textContent = 'Send Code';
-        document.getElementById('login-primary-btn').onclick = sendLoginPin;
         modal.classList.remove('invisible', 'opacity-0');
         modal.classList.add('visible', 'opacity-100');
-    };
+        document.getElementById('login-email-input').focus();
+    }
 
     window.closeLoginModal = function () {
         const modal = document.getElementById('login-modal');
         modal.classList.remove('visible', 'opacity-100');
         modal.classList.add('invisible', 'opacity-0');
-    };
-
-    window.goBackToStep1 = function () {
+        
         document.getElementById('login-step-1').classList.remove('hidden');
-        document.getElementById('login-step-2').classList.add('hidden');
+        document.getElementById('login-step-2').classList.hidden = true;
         document.getElementById('login-error').classList.add('hidden');
         document.getElementById('login-success').classList.add('hidden');
-        document.getElementById('login-primary-btn').textContent = 'Send Code';
-        document.getElementById('login-primary-btn').onclick = sendLoginPin;
-    };
+        document.getElementById('login-email-input').value = '';
+        document.getElementById('login-name-input').value = '';
+        document.getElementById('login-pin-input').value = '';
+    }
 
     window.sendLoginPin = async function () {
-        const nameInput = document.getElementById('login-name-input').value.trim();
         const emailInput = document.getElementById('login-email-input').value.trim().toLowerCase();
+        const nameInput = document.getElementById('login-name-input').value.trim();
         const errorEl = document.getElementById('login-error');
         const successEl = document.getElementById('login-success');
         const btn = document.getElementById('login-primary-btn');
@@ -987,31 +979,34 @@ document.addEventListener('DOMContentLoaded', () => {
         errorEl.classList.add('hidden');
         successEl.classList.add('hidden');
 
-        if (!nameInput || !emailInput) {
+        if (!emailInput || !nameInput) {
             errorEl.textContent = 'Please enter both your name and email address.';
             errorEl.classList.remove('hidden');
             return;
         }
 
-        // Only send to authorized emails — no point sending a code to strangers
-        const match = AUTHORIZED_USERS.find(u => u.email.toLowerCase() === emailInput);
-        if (!match) {
-            errorEl.textContent = 'That email is not in the authorized list. You will have view-only access.';
-            errorEl.classList.remove('hidden');
-            // After 2 seconds, grant view-only silently
-            setTimeout(() => {
-                currentUser = { id: emailInput, name: nameInput, email: emailInput, role: 'viewer' };
-                isLoggedIn = false;
-                closeLoginModal();
-                updateUIForAuth();
-            }, 2000);
-            return;
-        }
-
-        btn.textContent = 'Sending...';
+        btn.textContent = 'Checking access...';
         btn.disabled = true;
 
         try {
+            // Check permissions first
+            const permRes = await fetch(SHEET_URL + '?type=permissions&email=' + encodeURIComponent(emailInput));
+            const permData = await permRes.json();
+            
+            if (permData.permissions.role === 'viewer') {
+                errorEl.textContent = 'That email is not authorized for elevated access. You will have view-only access.';
+                errorEl.classList.remove('hidden');
+                setTimeout(() => {
+                    currentUser = { id: emailInput, name: nameInput, email: emailInput, role: 'viewer', canAccessData: false, canAccessIntel: false };
+                    isLoggedIn = false;
+                    closeLoginModal();
+                    updateUIForAuth();
+                }, 2000);
+                return;
+            }
+            
+            btn.textContent = 'Sending...';
+            
             const response = await fetch(SHEET_URL, {
                 method: 'POST',
                 body: JSON.stringify({ action: 'sendpin', email: emailInput, name: nameInput })
@@ -1022,7 +1017,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('login-step-1').classList.add('hidden');
                 document.getElementById('login-step-2').classList.remove('hidden');
                 document.getElementById('login-pin-input').value = '';
-                successEl.textContent = 'Code sent! Check your inbox (and spam folder just in case).';
+                successEl.textContent = 'Code sent! Check your inbox.';
                 successEl.classList.remove('hidden');
                 btn.textContent = 'Verify Code';
                 btn.disabled = false;
@@ -1035,7 +1030,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.disabled = false;
             }
         } catch (err) {
-            errorEl.textContent = 'Could not reach the server. Make sure your local server is running.';
+            errorEl.textContent = 'Could not reach the server.';
             errorEl.classList.remove('hidden');
             btn.textContent = 'Send Code';
             btn.disabled = false;
@@ -1044,7 +1039,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.verifyLoginPin = async function () {
         const emailInput = document.getElementById('login-email-input').value.trim().toLowerCase();
-        const nameInput  = document.getElementById('login-name-input').value.trim();
         const pinInput   = document.getElementById('login-pin-input').value.trim();
         const errorEl    = document.getElementById('login-error');
         const btn        = document.getElementById('login-primary-btn');
@@ -1068,9 +1062,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (result.status === 'success') {
-                const match = AUTHORIZED_USERS.find(u => u.email.toLowerCase() === emailInput);
-                currentUser = { id: emailInput, name: match ? match.name : nameInput, email: emailInput, role: match ? match.role : 'viewer' };
-                isLoggedIn = !!match;
+                // Fetch final permissions
+                const permRes = await fetch(SHEET_URL + '?type=permissions&email=' + encodeURIComponent(emailInput));
+                const permData = await permRes.json();
+                
+                currentUser = permData.permissions;
+                isLoggedIn = true;
+                
+                if (currentUser.role === 'admin' && permData.allUsers) {
+                    ALL_USERS = permData.allUsers;
+                }
+                
+                // Set CSM list
+                if (permData.allUsers) {
+                    CSMs = permData.allUsers.filter(u => u.role === 'csm' || u.role === 'admin').map(u => u.name);
+                } else if (currentUser.role === 'csm') {
+                    CSMs = [currentUser.name]; // fallback if they are a csm but cant see all users
+                }
+                
                 closeLoginModal();
                 updateUIForAuth();
             } else {
@@ -1092,7 +1101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const manageCsmBtn = document.getElementById('manage-csm-btn');
 
         if (isLoggedIn) {
-            const roleBadge = currentUser.role === 'admin' ? ' 🛡️' : '';
+            const roleBadge = currentUser.role === 'admin' ? ' 👑' : '';
             loginBtn.textContent = `Logged in: ${currentUser.name}${roleBadge}`;
             loginBtn.onclick = null;
             loginBtn.classList.remove('bg-indigo-600');
@@ -1106,12 +1115,12 @@ document.addEventListener('DOMContentLoaded', () => {
             loginBtn.disabled = true;
         }
 
-        // Only show Manage CSMs and AI admin controls to admins
-        if (manageCsmBtn) {
-            manageCsmBtn.style.display = (isLoggedIn && currentUser.role === 'admin') ? '' : 'none';
-        }
-        
         const isAdmin = isLoggedIn && currentUser.role === 'admin';
+        
+        // Show Manage Users to Admins
+        if (manageCsmBtn) {
+            manageCsmBtn.style.display = isAdmin ? 'inline-block' : 'none';
+        }
         
         // Show AI admin controls if admin
         const batchControls = document.getElementById('batch-admin-controls');
@@ -1123,6 +1132,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (manualTicketPanel) manualTicketPanel.classList.toggle('hidden', !isAdmin);
         if (retryBtn) retryBtn.classList.toggle('hidden', !isAdmin);
         if (readOnlyNotice) readOnlyNotice.classList.toggle('hidden', isAdmin);
+        
+        // Hide/Show navigation tabs based on permissions
+        const navTriage = document.getElementById('nav-triage');
+        const navData = document.getElementById('nav-data');
+        const navTickets = document.getElementById('nav-tickets');
+        
+        if (navTriage) navTriage.style.display = (currentUser.role === 'admin' || currentUser.role === 'csm') ? 'flex' : 'none';
+        if (navData) navData.style.display = (currentUser.canAccessData) ? 'block' : 'none';
+        if (navTickets) navTickets.style.display = (currentUser.canAccessIntel) ? 'block' : 'none';
+        
+        // If current view is hidden, switch to dashboard
+        if (!isLoggedIn && (currentView === 'triage' || currentView === 'data' || currentView === 'tickets')) {
+            navigateTo('dashboard');
+        } else if (isLoggedIn) {
+            if (currentView === 'data' && !currentUser.canAccessData) navigateTo('dashboard');
+            if (currentView === 'tickets' && !currentUser.canAccessIntel) navigateTo('dashboard');
+        }
 
         // --- CSM SCOPING: auto-filter both tabs to the logged-in CSM's accounts ---
         const scopedCsm = (isLoggedIn && !isAdmin) ? currentUser.name : 'all';
@@ -1300,7 +1326,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openCsmManager = function () {
         const modal = document.getElementById('csm-modal');
-        renderCsmList();
+        renderUserList();
         modal.classList.remove('invisible', 'opacity-0');
         modal.classList.add('visible', 'opacity-100');
     }
@@ -1311,56 +1337,111 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.classList.add('invisible', 'opacity-0');
     }
 
-    function renderCsmList() {
-        const listEl = document.getElementById('csm-list');
+    function renderUserList() {
+        const listEl = document.getElementById('user-list');
         listEl.innerHTML = '';
 
-        if (CSMs.length === 0) {
-            listEl.innerHTML = '<p class="text-gray-500 text-sm">No CSMs configured yet.</p>';
+        if (ALL_USERS.length === 0) {
+            listEl.innerHTML = '<tr><td colspan="7" class="px-4 py-4 text-center text-gray-500">No users found.</td></tr>';
             return;
         }
 
-        CSMs.forEach((csm, index) => {
-            const item = document.createElement('div');
-            item.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg';
-            item.innerHTML = `
-        <span class="text-sm font-medium text-gray-800">${csm}</span>
-        <button onclick="removeCsm(${index})" class="px-3 py-1 bg-red-500 text-white text-xs font-semibold rounded hover:bg-red-600 transition">
-            Remove
-        </button>
-    `;
-            listEl.appendChild(item);
+        ALL_USERS.forEach((u, index) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">${u.name}</td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">${u.email}</td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${u.role === 'admin' ? 'bg-purple-100 text-purple-800' : u.role === 'csm' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}">
+                        ${u.role}
+                    </span>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-center text-gray-500">${u.role === 'admin' || u.role === 'csm' ? '✅' : '❌'}</td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-center text-gray-500">${u.canAccessData || u.role === 'admin' ? '✅' : '❌'}</td>
+                <td class="px-4 py-3 whitespace-nowrap text-sm text-center text-gray-500">${u.canAccessIntel || u.role === 'admin' ? '✅' : '❌'}</td>
+                <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
+                    <button onclick="removeUser(${index})" class="text-red-600 hover:text-red-900 transition ml-2">Delete</button>
+                </td>
+            `;
+            listEl.appendChild(tr);
         });
     }
 
-    window.addNewCsm = function () {
-        const input = document.getElementById('new-csm-name');
-        const name = input.value.trim();
+    window.addNewUser = function () {
+        const nameInput = document.getElementById('new-user-name');
+        const emailInput = document.getElementById('new-user-email');
+        const roleSelect = document.getElementById('new-user-role');
+        const dataCheckbox = document.getElementById('new-user-data');
+        const intelCheckbox = document.getElementById('new-user-intel');
 
-        if (name === '') {
-            alert('Please enter a CSM name');
+        const name = nameInput.value.trim();
+        const email = emailInput.value.trim().toLowerCase();
+        
+        if (!name || !email) {
+            alert('Name and Email are required.');
+            return;
+        }
+        
+        if (ALL_USERS.find(u => u.email === email)) {
+            alert('A user with this email already exists.');
             return;
         }
 
-        if (CSMs.includes(name)) {
-            alert('This CSM already exists');
-            return;
-        }
+        ALL_USERS.push({
+            name: name,
+            email: email,
+            role: roleSelect.value,
+            canAccessData: dataCheckbox.checked,
+            canAccessIntel: intelCheckbox.checked
+        });
 
-        CSMs.push(name);
-        input.value = '';
-        renderCsmList();
-        updateCsmDropdowns();
-        alert(`CSM "${name}" added successfully!`);
+        nameInput.value = '';
+        emailInput.value = '';
+        roleSelect.value = 'viewer';
+        document.getElementById('new-user-triage').checked = false;
+        dataCheckbox.checked = false;
+        intelCheckbox.checked = false;
+
+        renderUserList();
     }
 
-    window.removeCsm = function (index) {
-        const csmName = CSMs[index];
-        if (confirm(`Remove "${csmName}"?`)) {
-            CSMs.splice(index, 1);
-            renderCsmList();
-            updateCsmDropdowns();
-            renderTriageList();
+    window.removeUser = function (index) {
+        if (confirm(`Are you sure you want to remove ${ALL_USERS[index].name}?`)) {
+            ALL_USERS.splice(index, 1);
+            renderUserList();
+        }
+    }
+
+    window.saveUsers = async function () {
+        const btn = document.getElementById('save-users-btn');
+        btn.textContent = 'Saving...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(SHEET_URL, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'save_permissions',
+                    triggeredByEmail: currentUser.email,
+                    users: ALL_USERS
+                })
+            });
+            
+            const result = await response.json();
+            if (result.status === 'success') {
+                alert('Permissions saved successfully!');
+                // Update local CSM array
+                CSMs = ALL_USERS.filter(u => u.role === 'csm' || u.role === 'admin').map(u => u.name);
+                updateCsmDropdowns();
+                closeCsmModal();
+            } else {
+                alert('Error saving permissions: ' + result.message);
+            }
+        } catch (err) {
+            alert('Error communicating with server.');
+        } finally {
+            btn.textContent = 'Save Changes';
+            btn.disabled = false;
         }
     }
 
@@ -3198,6 +3279,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     let sevColor = severity === 'critical' ? 'text-red-700 font-bold' : 'text-gray-700';
 
+                    const b64Subject = btoa(encodeURIComponent(r.proposed_subject || ''));
+                    const b64Int = btoa(encodeURIComponent(r.integration || 'None'));
+                    const b64Prod = btoa(encodeURIComponent(r.product_area || 'Other'));
+
                     container.innerHTML += `
                 <tr class="hover:bg-amber-50">
                     <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
@@ -3209,7 +3294,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="px-3 py-2 whitespace-nowrap text-sm">${resolution}</td>
                     <td class="px-3 py-2 text-xs text-amber-700 font-medium">${flags.join(', ')}</td>
                     <td class="px-3 py-2 whitespace-nowrap text-center">
-                        <button onclick="openOverrideModal(${r.ticket_id}, \`${(r.proposed_subject || '').replace(/`/g, '')}\`, '${r.integration || 'None'}', '${r.product_area || 'Other'}')" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Manually edit subject, integration, and product area">Edit</button>
+                        <button onclick="openOverrideModal(${r.ticket_id}, '${b64Subject}', '${b64Int}', '${b64Prod}')" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Manually edit subject, integration, and product area">Edit</button>
                         <button onclick="dismissAiTicket(${r.ticket_id})" class="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs font-semibold mr-1" title="Accept this classification and clear it from the queue (keeps it in your charts)">Dismiss</button>
                         <button onclick="skipAiTicket(${r.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold mr-1" title="Remove from charts and mark as noise forever">Noise</button>
                         <button onclick="reprocessAiTicket(${r.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold" title="Re-run AI classification on this ticket">Re-run</button>
@@ -3434,7 +3519,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // ── AI Queue Action Handlers ─────────────────────────────────────────────
-    window.openOverrideModal = function(ticketId, currentSubject, currentIntegration, currentProduct) {
+    window.openOverrideModal = function(ticketId, b64Subject, b64Int, b64Prod) {
+        const currentSubject = decodeURIComponent(atob(b64Subject));
+        const currentIntegration = decodeURIComponent(atob(b64Int));
+        const currentProduct = decodeURIComponent(atob(b64Prod));
+
         document.getElementById('override-ticket-id').value = ticketId;
         document.getElementById('override-subject').value = currentSubject;
         
@@ -3457,14 +3546,16 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const modal = document.getElementById('override-modal');
         modal.classList.remove('invisible', 'opacity-0');
-        modal.classList.add('opacity-100');
+        modal.classList.add('visible', 'opacity-100');
     };
 
     window.closeOverrideModal = function() {
         const modal = document.getElementById('override-modal');
-        modal.classList.remove('opacity-100');
+        modal.classList.remove('visible', 'opacity-100');
         modal.classList.add('opacity-0');
-        setTimeout(() => modal.classList.add('invisible'), 300);
+        setTimeout(() => {
+            modal.classList.add('invisible');
+        }, 300);
     };
 
     window.saveManualOverride = function() {

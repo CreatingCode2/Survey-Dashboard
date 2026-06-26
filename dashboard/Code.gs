@@ -1,728 +1,265 @@
+// ==========================================================================
+// FILE: Config.gs
+// ==========================================================================
+
 var BATCH_ADMIN_EMAILS = [
   'misty.wilmore@runnertechnologies.com'
 ];
 
 function isBatchAdmin(email) {
   if (!email) return false;
-  return BATCH_ADMIN_EMAILS.indexOf(email.toLowerCase().trim()) !== -1;
-}
-
-function doGet(e) {
-  var sheetName = 'Form Responses 1';
-
-  if (e && e.parameter) {
-
-    // ----------------------------------------------------------------
-    // TYPE: contacts — GET proxy for Outreach modal (bypasses POST redirect issue)
-    // ----------------------------------------------------------------
-    if (e.parameter.type === 'contacts') {
-      var companyName = e.parameter.companyName || '';
-      if (!companyName) {
-        return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'companyName required', gs_version: '1.3' }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-      var domain = 'runnertech.freshdesk.com';
-      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-      var fdOpts = { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true };
-
-      // Find company
-      var companyId = null;
-      var sRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/companies/autocomplete?name=' + encodeURIComponent(companyName), fdOpts);
-      if (sRes.getResponseCode() === 200) {
-        var sRaw = JSON.parse(sRes.getContentText());
-        var cos = Array.isArray(sRaw) ? sRaw : (sRaw.companies || []);
-        if (cos.length > 0) companyId = cos[0].id;
-      }
-      if (!companyId) {
-        var listRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/companies?per_page=100', fdOpts);
-        if (listRes.getResponseCode() === 200) {
-          var allCos = JSON.parse(listRes.getContentText());
-          var needle = companyName.toLowerCase().substring(0, 12);
-          for (var ci = 0; ci < allCos.length; ci++) {
-            if (allCos[ci].name && allCos[ci].name.toLowerCase().indexOf(needle) !== -1) { companyId = allCos[ci].id; break; }
-          }
-        }
-      }
-      if (!companyId) {
-        return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Company not found: ' + companyName, gs_version: '1.3' }))
-          .setMimeType(ContentService.MimeType.JSON);
-      }
-
-      // Get ticket dates by contact
-      var tByUser = {};
-      var tRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets?company_id=' + companyId + '&per_page=100', fdOpts);
-      if (tRes.getResponseCode() === 200) {
-        var tkts = JSON.parse(tRes.getContentText());
-        for (var ti = 0; ti < tkts.length; ti++) {
-          var t = tkts[ti];
-          if (t.requester_id) {
-            var td = new Date(t.created_at).getTime();
-            if (!tByUser[t.requester_id] || td > tByUser[t.requester_id]) tByUser[t.requester_id] = td;
-          }
-        }
-      }
-
-      // Get and filter contacts
-      var validContacts = [];
-      var cRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/contacts?company_id=' + companyId + '&per_page=100', fdOpts);
-      if (cRes.getResponseCode() === 200) {
-        var cts = JSON.parse(cRes.getContentText());
-        for (var i = 0; i < cts.length; i++) {
-          var c = cts[i];
-          var cn = (c.name || '').toLowerCase();
-          if (cn.indexOf('- do not contact') !== -1 || cn.indexOf('- retired') !== -1 || cn.indexOf(' retired') !== -1) continue;
-          if (!c.email) continue;
-          validContacts.push({ id: c.id, name: c.name, email: c.email, job_title: c.job_title || '', lastTicketTime: tByUser[c.id] || 0 });
-        }
-      }
-      validContacts.sort(function(a, b) {
-        if (a.lastTicketTime > 0 && b.lastTicketTime > 0) return b.lastTicketTime - a.lastTicketTime;
-        if (a.lastTicketTime > 0) return -1;
-        if (b.lastTicketTime > 0) return 1;
-        return a.name.localeCompare(b.name);
-      });
-
-      return ContentService.createTextOutput(JSON.stringify({ status: 'success', data: { companyId: companyId, contacts: validContacts }, gs_version: '1.3' }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    if (e.parameter.type === 'freshdesk') {
-      sheetName = 'Freshdesk_Data';
-    } else if (e.parameter.type === 'triage') {
-      sheetName = 'Triage_Data';
-    } else if (e.parameter.type === 'ticket_trends') {
-      sheetName = 'Ticket_AI_Data';
-    } else if (e.parameter.type === 'ai_log') {
-      sheetName = 'AI_Processing_Log';
-    } else if (e.parameter.type === 'ai_status') {
-      // ----------------------------------------------------------------
-      // TYPE: ai_status — Returns the current state of the batch processor
-      // ----------------------------------------------------------------
-      var status = getBatchAiStatus();
-      return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: status }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
-
-  if (!sheet) {
-    return ContentService.createTextOutput('Error: Sheet "' + sheetName + '" not found')
-      .setMimeType(ContentService.MimeType.TEXT);
-  }
-
-  var data = sheet.getDataRange().getValues();
-  var csvLines = [];
-
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    var csvRow = [];
-
-    for (var j = 0; j < row.length; j++) {
-      var cell = row[j];
-      var cellValue = '';
-
-      if (cell instanceof Date) {
-        cellValue = cell.toISOString();
-      } else if (cell === null || cell === undefined) {
-        cellValue = '';
-      } else {
-        cellValue = String(cell);
-      }
-
-      cellValue = cellValue.replace(/[\r\n]+/g, ' ');
-      cellValue = cellValue.replace(/"/g, '""');
-
-      if (cellValue.indexOf(',') !== -1 || cellValue.indexOf('"') !== -1 || cellValue.indexOf(' ') !== -1) {
-        cellValue = '"' + cellValue + '"';
-      }
-
-      csvRow.push(cellValue);
-    }
-
-    csvLines.push(csvRow.join(','));
-  }
-
-  return ContentService.createTextOutput(csvLines.join('\n'))
-    .setMimeType(ContentService.MimeType.CSV);
-}
-
-
-function doPost(e) {
+  var emailLower = email.toLowerCase().trim();
+  if (BATCH_ADMIN_EMAILS.indexOf(emailLower) !== -1) return true;
+  
   try {
-    var postData = JSON.parse(e.postData.contents);
-    var action = postData.action || 'triage';
-
-    // ----------------------------------------------------------------
-    // ACTION: sendpin  — generate & email a 6-digit login PIN
-    // ----------------------------------------------------------------
-    if (action === 'sendpin') {
-      var email = (postData.email || '').toLowerCase().trim();
-      var name  = postData.name || 'there';
-
-      if (!email) {
-        return jsonResponse('error', 'Email is required.');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('User_Permissions');
+    if (sheet) {
+      var data = sheet.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        var rowEmail = String(data[i][1]).toLowerCase().trim();
+        var rowRole = String(data[i][2]).toLowerCase().trim();
+        if (rowEmail === emailLower && rowRole === 'admin') {
+          return true;
+        }
       }
+    }
+  } catch (e) {
+    Logger.log("Error checking batch admin in sheet: " + e);
+  }
+  return false;
+}
 
-      var pin = Math.floor(100000 + Math.random() * 900000).toString();
-      var expires = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min expiry
-
-      // Store the PIN in a Login_Pins sheet (create if needed)
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var pinSheet = ss.getSheetByName('Login_Pins');
-      if (!pinSheet) {
-        pinSheet = ss.insertSheet('Login_Pins');
-        pinSheet.appendRow(['Email', 'Pin', 'Expires', 'Used']);
-      }
-
-      // Remove any old entries for this email
-      var lastRow = pinSheet.getLastRow();
-      if (lastRow > 1) {
-        var emailCol = pinSheet.getRange(2, 1, lastRow - 1, 1).getValues();
-        for (var i = emailCol.length - 1; i >= 0; i--) {
-          if (emailCol[i][0].toString().toLowerCase() === email) {
-            pinSheet.deleteRow(i + 2);
+function getUserPermissions(email) {
+  var defaultPerms = { name: 'Unknown', email: email, role: 'viewer', canAccessData: false, canAccessIntel: false };
+  if (!email) return defaultPerms;
+  
+  var emailLower = email.toLowerCase().trim();
+  
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('User_Permissions');
+    if (sheet) {
+      var data = sheet.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        var rowEmail = String(data[i][1]).toLowerCase().trim();
+        if (rowEmail === emailLower) {
+          var role = String(data[i][2]).toLowerCase().trim();
+          var canAccessData = String(data[i][3]).toLowerCase() === 'true';
+          var canAccessIntel = String(data[i][4]).toLowerCase() === 'true';
+          
+          if (role === 'admin') {
+            canAccessData = true;
+            canAccessIntel = true;
           }
-        }
-      }
-
-      // Append new PIN row
-      pinSheet.appendRow([email, pin, expires, 'false']);
-
-      // Send the PIN by email
-      var subject = 'Your Customer Health Dashboard Login Code';
-      var body = 'Hello ' + name + ',\n\n' +
-                 'Your verification code is:\n\n' +
-                 '    ' + pin + '\n\n' +
-                 'This code will expire in 10 minutes.\n\n' +
-                 'If you did not request this code, please ignore this email.\n\n' +
-                 'Best,\nRunner Technologies Customer Success';
-
-      MailApp.sendEmail(email, subject, body);
-
-      return jsonResponse('success', 'PIN sent.');
-    }
-
-    // ----------------------------------------------------------------
-    // ACTION: verifypin — check the PIN and mark it used
-    // ----------------------------------------------------------------
-    if (action === 'verifypin') {
-      var email = (postData.email || '').toLowerCase().trim();
-      var pin   = (postData.pin   || '').trim();
-
-      if (!email || !pin) {
-        return jsonResponse('error', 'Email and PIN are required.');
-      }
-
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var pinSheet = ss.getSheetByName('Login_Pins');
-      if (!pinSheet) {
-        return jsonResponse('error', 'No PINs have been generated yet.');
-      }
-
-      var lastRow = pinSheet.getLastRow();
-      if (lastRow < 2) {
-        return jsonResponse('error', 'No PINs have been generated yet.');
-      }
-
-      var rows = pinSheet.getRange(2, 1, lastRow - 1, 4).getValues();
-      var now  = new Date();
-
-      for (var i = 0; i < rows.length; i++) {
-        var rowEmail   = rows[i][0].toString().toLowerCase().trim();
-        var rowPin     = rows[i][1].toString().trim();
-        var rowExpires = new Date(rows[i][2]);
-        var rowUsed    = rows[i][3].toString();
-
-        if (rowEmail === email && rowPin === pin) {
-          if (rowUsed === 'true') {
-            return jsonResponse('error', 'This code has already been used.');
-          }
-          if (now > rowExpires) {
-            return jsonResponse('error', 'This code has expired. Please request a new one.');
-          }
-          // Mark as used
-          pinSheet.getRange(i + 2, 4).setValue('true');
-          return jsonResponse('success', 'PIN verified.');
-        }
-      }
-
-      return jsonResponse('error', 'Incorrect code. Please try again.');
-    }
-
-    // ----------------------------------------------------------------
-    // ACTION: AI Batch Job Controls
-    // ----------------------------------------------------------------
-    if (action === 'start_batch_ai') {
-      var triggeredByEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(triggeredByEmail)) {
-        return jsonResponse('error', 'Access denied. Only authorized admins can run batch jobs. Contact Misty Wilmore.');
-      }
-      var dryRun = postData.dryRun === true;
-      var overwrite = postData.overwrite === true;
-      var limit = postData.limit || 0;
-      var daysBack = postData.daysBack || 365;
-      var startDate = postData.startDate || '';
-      var endDate = postData.endDate || '';
-      var triggeredBy = postData.triggeredBy || 'Unknown';
-      startBatchAiJob(dryRun, overwrite, triggeredBy, triggeredByEmail, limit, daysBack, startDate, endDate);
-      return jsonResponse('success', 'Batch job started (dryRun: ' + dryRun + ', overwrite: ' + overwrite + ', by: ' + triggeredBy + ', limit: ' + limit + ').');
-    }
-    
-    if (action === 'run_batch_audit') {
-      var auditCallerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(auditCallerEmail)) {
-        return jsonResponse('error', 'Access denied.');
-      }
-      var daysBack = postData.daysBack || 365;
-      var startDate = postData.startDate || '';
-      var endDate = postData.endDate || '';
-      runBatchAudit(daysBack, startDate, endDate);
-      return jsonResponse('success', 'Audit complete. Check the Audit_Report tab.');
-    }
-    
-    if (action === 'stop_batch_ai') {
-      var stopCallerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(stopCallerEmail)) {
-        return jsonResponse('error', 'Access denied.');
-      }
-      stopBatchAiJob();
-      return jsonResponse('success', 'Batch job stopped.');
-    }
-
-    // ── Manual single-ticket processing ──────────────────────
-    if (action === 'process_single_ticket') {
-      var callerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(callerEmail)) {
-        return jsonResponse('error', 'Access denied. Only authorized admins can process tickets manually.');
-      }
-      var ticketId = postData.ticketId ? String(postData.ticketId).trim() : '';
-      if (!ticketId || isNaN(Number(ticketId))) {
-        return jsonResponse('error', 'Invalid ticketId. Please provide a numeric Freshdesk ticket ID.');
-      }
-      var forceReprocess = postData.forceReprocess === true;
-      var callerName = postData.triggeredBy || 'Unknown';
-      // Temporarily set audit props so logAiProcessing captures the right user
-      var props = PropertiesService.getScriptProperties();
-      props.setProperty('AI_Batch_TriggeredBy', callerName);
-      props.setProperty('AI_Batch_TriggeredByEmail', callerEmail);
-      var result = processTicketById(ticketId, false, forceReprocess);
-      return jsonResponse(result.status, result.message || result.status, result.ai_result);
-    }
-
-    // ── Retry all failed tickets from AI_Processing_Log ──────
-    if (action === 'retry_failed_tickets') {
-      var retryCallerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(retryCallerEmail)) {
-        return jsonResponse('error', 'Access denied.');
-      }
-      var retryCallerName = postData.triggeredBy || 'Unknown';
-      var retryCount = retryFailedTicketsJob(retryCallerName, retryCallerEmail);
-      return jsonResponse('success', 'Queued ' + retryCount + ' failed ticket(s) for reprocessing.');
-    }
-
-    // ── AI Queue Action Handlers ─────────────────────────────
-    if (action === 'override_ai_classification') {
-      var overrideCallerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(overrideCallerEmail)) return jsonResponse('error', 'Access denied.');
-      
-      var ticketId = postData.ticketId;
-      var newSubject = postData.newSubject;
-      var newIntegration = postData.newIntegration;
-      var newProduct = postData.newProduct;
-      
-      var customFields = {
-        cf_ai_proposed_subject: newSubject,
-        cf_ai_integration: newIntegration,
-        cf_ai_product_area: newProduct
-      };
-      
-      var res = updateFreshdeskTicketFields(ticketId, customFields);
-      if (res && res.status === 'success') {
-        updateTicketAiDataRow(ticketId, {
-          proposed_subject: newSubject,
-          integration: newIntegration,
-          product_area: newProduct
-        });
-        return jsonResponse('success', 'Override saved.');
-      }
-      return jsonResponse('error', 'Failed to update Freshdesk: ' + (res ? res.message : 'Unknown error'));
-    }
-
-    if (action === 'skip_ai_ticket') {
-      var skipCallerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(skipCallerEmail)) return jsonResponse('error', 'Access denied.');
-      
-      var ticketId = postData.ticketId;
-      var res = updateFreshdeskTicketTags(ticketId, ['ai:skipped']);
-      if (res && res.status === 'success') {
-        deleteTicketAiDataRow(ticketId);
-        logAiProcessing(ticketId, 'skipped', 'Skipped via UI review', false, null);
-        return jsonResponse('success', 'Ticket skipped.');
-      }
-      return jsonResponse('error', 'Failed to add tag to Freshdesk.');
-    }
-
-    if (action === 'dismiss_ai_ticket') {
-      var dismissCallerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(dismissCallerEmail)) return jsonResponse('error', 'Access denied.');
-      
-      var ticketId = postData.ticketId;
-      var res = updateFreshdeskTicketTags(ticketId, ['ai:reviewed']);
-      if (res && res.status === 'success') {
-        addTagToTicketAiDataRow(ticketId, 'ai:reviewed');
-        return jsonResponse('success', 'Ticket dismissed from queue.');
-      }
-      return jsonResponse('error', 'Failed to add tag to Freshdesk.');
-    }
-
-    if (action === 'reprocess_ai_ticket') {
-      var reprocessCallerEmail = postData.triggeredByEmail || '';
-      if (!isBatchAdmin(reprocessCallerEmail)) return jsonResponse('error', 'Access denied.');
-      
-      var ticketId = postData.ticketId;
-      
-      var customFields = { cf_ai_proposed_subject: null, cf_ai_summary_notes: null, cf_ai_product_area: null, cf_ai_integration: null, cf_ai_severity: null };
-      updateFreshdeskTicketFields(ticketId, customFields);
-      removeFreshdeskAiTags(ticketId);
-      deleteTicketAiDataRow(ticketId);
-      
-      var props = PropertiesService.getScriptProperties();
-      props.setProperty('AI_Batch_TriggeredBy', postData.triggeredBy || 'Unknown');
-      props.setProperty('AI_Batch_TriggeredByEmail', reprocessCallerEmail);
-      var result = processTicketById(ticketId, false, true);
-      
-      return jsonResponse(result.status, 'Reprocessed ticket.');
-    }
-
-    // ----------------------------------------------------------------
-    // ACTION: get_outreach_contacts
-    // ----------------------------------------------------------------
-    if (action === 'get_outreach_contacts') {
-      var companyName = postData.companyName;
-      if (!companyName) return jsonResponse('error', 'Company Name missing.');
-
-      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-      var domain = 'runnertech.freshdesk.com';
-      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-      var options = { 'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' }, 'muteHttpExceptions': true };
-      
-      // 0. Resolve the Company Name into a Freshdesk Company ID
-      // The autocomplete endpoint returns a flat array of company objects
-      var companySearchUrl = 'https://' + domain + '/api/v2/companies/autocomplete?name=' + encodeURIComponent(companyName);
-      var searchRes = UrlFetchApp.fetch(companySearchUrl, options);
-      var companyId = null;
-      
-      if (searchRes.getResponseCode() === 200) {
-        var searchRaw = JSON.parse(searchRes.getContentText());
-        // Handle both flat array and {companies:[]} response formats
-        var companies = Array.isArray(searchRaw) ? searchRaw : (searchRaw.companies || []);
-        if (companies.length > 0) {
-          companyId = companies[0].id;
-        }
-      }
-      
-      // Fallback: search via the companies list API if autocomplete failed
-      if (!companyId) {
-        var listUrl = 'https://' + domain + '/api/v2/companies?page=1&per_page=100';
-        var listRes = UrlFetchApp.fetch(listUrl, options);
-        if (listRes.getResponseCode() === 200) {
-          var allCompanies = JSON.parse(listRes.getContentText());
-          var nameLower = companyName.toLowerCase();
-          for (var ci = 0; ci < allCompanies.length; ci++) {
-            if (allCompanies[ci].name && allCompanies[ci].name.toLowerCase().indexOf(nameLower.substring(0, 10)) !== -1) {
-              companyId = allCompanies[ci].id;
-              break;
-            }
-          }
-        }
-      }
-      
-      if (!companyId) return jsonResponse('error', 'Company not found in Freshdesk: ' + companyName);
-
-      // 1. Fetch recent tickets to determine active submitters
-      var ticketDatesByUser = {};
-      var ticketUrl = 'https://' + domain + '/api/v2/tickets?company_id=' + companyId + '&per_page=100';
-      var ticketRes = UrlFetchApp.fetch(ticketUrl, options);
-      if (ticketRes.getResponseCode() === 200) {
-        var tickets = JSON.parse(ticketRes.getContentText());
-        for (var i = 0; i < tickets.length; i++) {
-           var t = tickets[i];
-           if (t.requester_id) {
-             var tDate = new Date(t.created_at).getTime();
-             if (!ticketDatesByUser[t.requester_id] || tDate > ticketDatesByUser[t.requester_id]) {
-                ticketDatesByUser[t.requester_id] = tDate;
-             }
-           }
-        }
-      }
-
-      // 2. Fetch contacts for this company
-      var contactsUrl = 'https://' + domain + '/api/v2/contacts?company_id=' + companyId + '&per_page=100';
-      var contactsRes = UrlFetchApp.fetch(contactsUrl, options);
-      var validContacts = [];
-      if (contactsRes.getResponseCode() === 200) {
-         var contacts = JSON.parse(contactsRes.getContentText());
-         for (var i = 0; i < contacts.length; i++) {
-           var c = contacts[i];
-           var cname = c.name ? c.name.toLowerCase() : '';
-           var cemail = c.email ? c.email : '';
-           
-           if (cname.indexOf('- do not contact') !== -1 || cname.indexOf('- retired') !== -1 || cname.indexOf(' retired') !== -1) continue;
-           if (!cemail) continue;
-
-           validContacts.push({
-             id: c.id,
-             name: c.name,
-             email: c.email,
-             job_title: c.job_title || '',
-             lastTicketTime: ticketDatesByUser[c.id] || 0
-           });
-         }
-      }
-
-      // 3. Sort: Has tickets first (newest to oldest), then no tickets
-      validContacts.sort(function(a, b) {
-         if (a.lastTicketTime > 0 && b.lastTicketTime > 0) return b.lastTicketTime - a.lastTicketTime;
-         if (a.lastTicketTime > 0) return -1;
-         if (b.lastTicketTime > 0) return 1;
-         return a.name.localeCompare(b.name);
-      });
-
-      return jsonResponse('success', { contacts: validContacts });
-    }
-
-    // ----------------------------------------------------------------
-    // ACTION: sendoutreach
-    // ----------------------------------------------------------------
-    if (action === 'sendoutreach') {
-      var targetEmail = postData.email;
-      var targetName = postData.name || '';
-      var ccEmails = postData.cc || '';
-      var bccEmails = postData.bcc || '';
-      var subject = postData.subject || 'Checking in';
-      var body = postData.body || 'Hi,\nJust checking in.\n\nThanks';
-
-      if (!targetEmail) return jsonResponse('error', 'Missing target email.');
-
-      // Dynamic Distribution List Greeting Check
-      var eMatch = targetEmail.toLowerCase();
-      if (eMatch.indexOf('admin@') === 0 || eMatch.indexOf('info@') === 0 || eMatch.indexOf('it@') === 0 || eMatch.indexOf('support@') === 0 || eMatch.indexOf('team@') === 0 || targetName.trim() === '') {
-         body = body.replace(/Hi .*?,|Hi,/, 'Hi ' + (postData.company || 'Team') + ' Team,');
-      } else {
-         var firstName = targetName.split(' ')[0];
-         body = body.replace(/Hi .*?,|Hi,/, 'Hi ' + firstName + ',');
-      }
-
-      var mailOptions = {
-         replyTo: 'support@runnertechnologies.com'
-      };
-      if (ccEmails) mailOptions.cc = ccEmails;
-      if (bccEmails) mailOptions.bcc = bccEmails;
-
-      try {
-        GmailApp.sendEmail(targetEmail, subject, body, mailOptions);
-        return jsonResponse('success', 'Outreach sent successfully.');
-      } catch (err) {
-        return jsonResponse('error', 'Failed to dispatch email: ' + err.toString());
-      }
-    }
-
-    // ----------------------------------------------------------------
-    // ACTION: addcontact
-    // ----------------------------------------------------------------
-    if (action === 'addcontact') {
-      var companyId = postData.companyId;
-      var addname = postData.name;
-      var addemail = postData.email;
-      var addtitle = postData.title || '';
-
-      if (!companyId || !addname || !addemail) return jsonResponse('error', 'Missing required fields.');
-
-      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-      
-      var payload = {
-         name: addname,
-         email: addemail,
-         company_id: parseInt(companyId, 10)
-      };
-      if (addtitle) payload.job_title = addtitle;
-
-      var options = {
-        'method': 'post',
-        'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-        'payload': JSON.stringify(payload),
-        'muteHttpExceptions': true
-      };
-
-      var res = UrlFetchApp.fetch('https://runnertech.freshdesk.com/api/v2/contacts', options);
-      var respCode = res.getResponseCode();
-      var respText = res.getContentText();
-
-      if (respCode === 201 || respCode === 200) {
-         return jsonResponse('success', 'Contact added to Freshdesk.');
-      } else if (respCode === 400 && (respText.indexOf('duplicate_value') !== -1 || respText.indexOf('already exists') !== -1)) {
-         // Fallback: Link existing contact to this company
-         var searchUrl = 'https://runnertech.freshdesk.com/api/v2/contacts?email=' + encodeURIComponent(addemail);
-         var sRes = UrlFetchApp.fetch(searchUrl, { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true });
-         if (sRes.getResponseCode() === 200) {
-            var existingList = JSON.parse(sRes.getContentText());
-            if (existingList && existingList.length > 0) {
-               var contactId = existingList[0].id;
-               var updateUrl = 'https://runnertech.freshdesk.com/api/v2/contacts/' + contactId;
-               var updatePayload = { company_id: parseInt(companyId, 10) };
-               if (addtitle) updatePayload.job_title = addtitle;
-               
-               UrlFetchApp.fetch(updateUrl, {
-                 'method': 'put',
-                 'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-                 'payload': JSON.stringify(updatePayload),
-                 'muteHttpExceptions': true
-               });
-               return jsonResponse('success', 'Existing contact linked to this company.');
-            }
-         }
-      }
-      return jsonResponse('error', 'Failed to add contact to Freshdesk. ' + respText);
-    }
-
-    // ----------------------------------------------------------------
-    // ACTION: markContactInvalid
-    // ----------------------------------------------------------------
-    if (action === 'markContactInvalid') {
-      var emailToMark = postData.email;
-      if (!emailToMark) return jsonResponse('error', 'Missing email.');
-
-      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-
-      var searchUrl = 'https://runnertech.freshdesk.com/api/v2/contacts?email=' + encodeURIComponent(emailToMark);
-      var sRes = UrlFetchApp.fetch(searchUrl, { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true });
-
-      if (sRes.getResponseCode() === 200) {
-         var existingList = JSON.parse(sRes.getContentText());
-         if (existingList && existingList.length > 0) {
-            var contactId = existingList[0].id;
-            var updateUrl = 'https://runnertech.freshdesk.com/api/v2/contacts/' + contactId;
-            var updatePayload = { 
-                custom_fields: { do_not_contact_: true } 
-            };
-            
-            var updateRes = UrlFetchApp.fetch(updateUrl, {
-              'method': 'put',
-              'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-              'payload': JSON.stringify(updatePayload),
-              'muteHttpExceptions': true
-            });
-            if (updateRes.getResponseCode() === 200) {
-                return jsonResponse('success', 'Contact marked as Do Not Contact in Freshdesk.');
-            } else {
-                return jsonResponse('error', 'Failed to update contact: ' + updateRes.getContentText());
-            }
-         } else {
-             return jsonResponse('error', 'Contact not found.');
-         }
-      } else {
-          return jsonResponse('error', 'Failed to search Freshdesk.');
-      }
-    }
-
-    // ----------------------------------------------------------------
-    // DEFAULT ACTION: triage update (existing logic)
-    // ----------------------------------------------------------------
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Triage_Data");
-    if (!sheet) {
-      return jsonResponse('error', 'Triage_Data sheet not found.');
-    }
-
-    var uniqueId  = postData.uniqueId;
-    var company   = postData.company;
-    var field     = postData.field;
-    var value     = postData.value;
-    var user      = postData.user;
-    var email     = postData.email || "";
-    var note      = postData.note  || "";
-    var timestamp = new Date().toISOString();
-
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow(["UniqueId", "Company", "Field", "Value", "Timestamp", "User", "Email", "Note"]);
-    }
-
-    sheet.appendRow([uniqueId, company, field, value, timestamp, user, email, note]);
-
-    // Email notification on CSM assignment
-    if (field === 'csm' && value !== 'Unassigned') {
-      var emailAddress = "";
-      if (value === "Misty Wilmore") {
-        emailAddress = "misty.wilmore@runnertechnologies.com";
-      } else if (value === "Tonja Jones") {
-        emailAddress = "tonja.jones@runnertechnologies.com";
-      }
-
-      if (emailAddress !== "") {
-        var subject = "New Customer Assignment: " + company;
-        var body = "Hello " + value + ",\n\n" +
-                   "You have been assigned as the CSM for " + company + " by " + user + " (" + email + ").\n\n" +
-                   "Please check the Customer Health Dashboard for more details.\n\n" +
-                   "Best,\nCustomer Success Team";
-        try {
-          GmailApp.sendEmail(emailAddress, subject, body, {
-            from: "customersuccess@runnertechnologies.com"
-          });
-        } catch(aliasError) {
-          MailApp.sendEmail(emailAddress, subject, body);
+          
+          return {
+            name: String(data[i][0]).trim(),
+            email: emailLower,
+            role: role,
+            canAccessData: canAccessData,
+            canAccessIntel: canAccessIntel
+          };
         }
       }
     }
+  } catch (e) {
+    Logger.log("Error fetching user permissions: " + e);
+  }
+  
+  // Fallback for hardcoded admin
+  if (BATCH_ADMIN_EMAILS.indexOf(emailLower) !== -1) {
+    defaultPerms.role = 'admin';
+    defaultPerms.canAccessData = true;
+    defaultPerms.canAccessIntel = true;
+  }
+  
+  return defaultPerms;
+}
 
-    // Email notification for Exhausted Contacts
-    if (field === 'status' && value === 'Requires CS Review - DNC/Exhausted') {
-       var csmSearch = 'Unassigned';
-       var rData = sheet.getDataRange().getValues();
-       for (var r = rData.length - 1; r >= 1; r--) {
-         if (rData[r][0] == uniqueId && rData[r][2] == 'csm') {
-             csmSearch = rData[r][3];
-             break;
-         }
-       }
-       if (csmSearch !== 'Unassigned') {
-         var emailExhaust = "";
-         if (csmSearch === "Misty Wilmore") emailExhaust = "misty.wilmore@runnertechnologies.com";
-         else if (csmSearch === "Tonja Jones") emailExhaust = "tonja.jones@runnertechnologies.com";
-         
-         if (emailExhaust !== "") {
-            var subjectExhaust = "Outreach Alert: " + company + " Contacts Exhausted";
-            var bodyExhaust = "Hello " + csmSearch + ",\n\n" +
-                       "All known contacts for " + company + " have either failed the cadence or are marked Do Not Contact/Retired.\n\n" +
-                       "Please perform manual research to find a new contact. Once you find one, open the dashboard's Engagement Blackout View and click [+ Add Researched Contact] to seamlessly inject them into the cadence.\n\n" +
-                       "Best,\nCustomer Health Automation";
-            try {
-              GmailApp.sendEmail(emailExhaust, subjectExhaust, bodyExhaust, {
-                from: "customersuccess@runnertechnologies.com"
-              });
-            } catch(aliasError) {
-              MailApp.sendEmail(emailExhaust, subjectExhaust, bodyExhaust);
-            }
-         }
-       }
+// ── Ticket types that should never be AI-processed (noise) ────
+var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
+
+var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847];
+
+var NOISE_SUBJECT_PHRASES = [
+  'out of office',
+  'automatic reply',
+  'auto-reply',
+  'vacation',
+  'autoreply',
+  'oracle: security notification',
+  'uptime robot',
+  'zoom',
+  'tempo',
+  'basecamp',
+  'rejected posting to infdba',
+  'runner edq: holiday reminder',
+  'your service request has been received and will be assigned',
+  'confluence',
+  'recall:',
+  'passcode',
+  'new voicemail',
+  'unused transaction pool expires',
+  'melissa product news',
+  'melissa data subscription update',
+  'file is complete and updated',
+  'completed file posted on ftp',
+  'transactions low'
+];
+
+function isNoiseSubject(subject) {
+  if (!subject) return false;
+  var s = subject.toLowerCase();
+  for (var i = 0; i < NOISE_SUBJECT_PHRASES.length; i++) {
+    if (s.indexOf(NOISE_SUBJECT_PHRASES[i]) !== -1) return true;
+  }
+  if (s.indexOf('runner edq') !== -1 && s.indexOf('celebration') !== -1) return true;
+  return false;
+}
+
+
+// ==========================================================================
+// FILE: SheetsService.gs
+// ==========================================================================
+
+
+function writeTicketAiData(ticket, aiResult) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Ticket_AI_Data');
+  if (!sheet) {
+    sheet = ss.insertSheet('Ticket_AI_Data');
+    sheet.appendRow([
+      'ticket_id', 'company_id', 'created_at', 'processed_at', 'subject_original', 
+      'proposed_subject', 'summary', 'issue_type', 'integration', 'product_area', 
+      'platform', 'severity', 'resolution', 'sentiment', 'status', 'tags'
+    ]);
+  }
+  
+  sheet.appendRow([
+    ticket.id,
+    ticket.company_id || '',
+    ticket.created_at,
+    new Date().toISOString(),
+    ticket.subject,
+    aiResult.proposed_subject,
+    aiResult.summary,
+    aiResult.issue_type,
+    aiResult.integration,
+    aiResult.product_area,
+    aiResult.platform,
+    aiResult.severity,
+    aiResult.resolution,
+    aiResult.sentiment,
+    ticket.status,
+    aiResult.tags_to_add.join(', ')
+  ]);
+}
+
+function logAiProcessing(ticketId, status, actionOrError, dryRun, aiResult) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('AI_Processing_Log');
+  if (!sheet) {
+    sheet = ss.insertSheet('AI_Processing_Log');
+    // 8-column header: includes proposed_subject + summary for dry-run audit preview
+    sheet.appendRow(['timestamp', 'ticket_id', 'action', 'status', 'error_message', 'dry_run', 'proposed_subject', 'summary']);
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  var triggeredBy = props.getProperty('AI_Batch_TriggeredBy') || 'Unknown';
+
+  var proposedSubject = '';
+  var summary = '';
+  if (status === 'success' && aiResult) {
+    proposedSubject = aiResult.proposed_subject || '';
+    // Truncate summary to 500 chars to avoid giant cells
+    summary = (aiResult.summary || '').substring(0, 500);
+  }
+
+  var actionStr;
+  if (status === 'success') actionStr = actionOrError;
+  else if (status === 'skipped') actionStr = 'skipped';
+  else actionStr = 'processing_failed';
+
+  sheet.appendRow([
+    new Date().toISOString(),
+    ticketId,
+    actionStr + ' [by: ' + triggeredBy + ']',
+    status,
+    (status === 'error' || status === 'skipped') ? actionOrError : '',
+    dryRun ? 'TRUE' : 'FALSE',
+    proposedSubject,
+    summary
+  ]);
+}
+
+// ============================================================================
+// DIAGNOSTIC & TEST HELPERS
+// ============================================================================
+
+/**
+ * STEP 1 — Run this FIRST.
+ * Dumps every custom field name and current value from a real ticket.
+ * This confirms the exact API field names (cf_revised_subject_name, etc.)
+ * before we attempt any writes.
+ *
+ * HOW TO USE:
+ *   1. Open Google Apps Script
+ *   2. Select "inspectTicketFields" from the function dropdown
+ *   3. Click Run
+ *   4. Open "Execution Log" and look for the custom_fields section
+ */
+
+function updateTicketAiDataRow(ticketId, updates) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Ticket_AI_Data');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(ticketId)) {
+      if (updates.proposed_subject !== undefined) sheet.getRange(i + 1, 6).setValue(updates.proposed_subject);
+      if (updates.integration !== undefined) sheet.getRange(i + 1, 9).setValue(updates.integration);
+      if (updates.product_area !== undefined) sheet.getRange(i + 1, 10).setValue(updates.product_area);
+      break;
     }
+  }
+}
 
-    return jsonResponse('success', 'Triage saved.');
+function deleteTicketAiDataRow(ticketId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Ticket_AI_Data');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  // Bottom up to not shift indices
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]).trim() === String(ticketId)) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
 
-  } catch (error) {
-    return jsonResponse('error', error.toString());
+function addTagToTicketAiDataRow(ticketId, tag) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Ticket_AI_Data');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(ticketId)) {
+      var existingTags = String(data[i][15] || ''); // index 15 is tags column
+      if (existingTags.indexOf(tag) === -1) {
+        var newTags = existingTags ? existingTags + ', ' + tag : tag;
+        sheet.getRange(i + 1, 16).setValue(newTags); // column 16 is index 15
+      }
+      break;
+    }
   }
 }
 
 
-// Helper: return a standard JSON response
-function jsonResponse(status, message) {
-  return ContentService
-    .createTextOutput(JSON.stringify({ status: status, message: message, gs_version: '1.3' }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+// ==========================================================================
+// FILE: FreshdeskService.gs
+// ==========================================================================
+
 
 
 function syncFreshdesk() {
@@ -915,6 +452,85 @@ function autoFlagExhaustedAccounts() {
     }
   }
 }
+
+// ── UI Queue Helper Functions ─────────────────────────────────────────────
+function updateFreshdeskTicketFields(ticketId, customFields) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  
+  var payload = { custom_fields: customFields };
+  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
+  var updateOptions = {
+    'method': 'put',
+    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    'payload': JSON.stringify(payload),
+    'muteHttpExceptions': true
+  };
+  
+  var updateRes = UrlFetchApp.fetch(updateUrl, updateOptions);
+  if (updateRes.getResponseCode() === 200) return { status: 'success' };
+  return { status: 'error', message: updateRes.getContentText() };
+}
+
+function updateFreshdeskTicketTags(ticketId, tagsToAdd) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
+  
+  // Get current tags
+  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, fdOpts);
+  if (res.getResponseCode() !== 200) return { status: 'error' };
+  var ticket = JSON.parse(res.getContentText());
+  var tags = ticket.tags || [];
+  
+  tagsToAdd.forEach(function(t) {
+    if (tags.indexOf(t) === -1) tags.push(t);
+  });
+  
+  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
+  var updateOptions = {
+    'method': 'put',
+    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    'payload': JSON.stringify({ tags: tags }),
+    'muteHttpExceptions': true
+  };
+  var updateRes = UrlFetchApp.fetch(updateUrl, updateOptions);
+  if (updateRes.getResponseCode() === 200) return { status: 'success' };
+  return { status: 'error', message: updateRes.getContentText() };
+}
+
+function removeFreshdeskAiTags(ticketId) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
+  
+  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, fdOpts);
+  if (res.getResponseCode() !== 200) return;
+  var ticket = JSON.parse(res.getContentText());
+  var tags = ticket.tags || [];
+  var newTags = [];
+  for (var i = 0; i < tags.length; i++) {
+    if (tags[i].indexOf('ai:') !== 0) newTags.push(tags[i]);
+  }
+  
+  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
+  var updateOptions = {
+    'method': 'put',
+    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    'payload': JSON.stringify({ tags: newTags }),
+    'muteHttpExceptions': true
+  };
+  UrlFetchApp.fetch(updateUrl, updateOptions);
+}
+
+
+// ==========================================================================
+// FILE: AiService.gs
+// ==========================================================================
+
 
 // ============================================================================
 // TICKET INTELLIGENCE & AI AUTOMATION
@@ -1399,239 +1015,6 @@ function processTicket(ticketId, dryRun) {
   return { status: 'success', ai_result: aiResult };
 }
 
-function writeTicketAiData(ticket, aiResult) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Ticket_AI_Data');
-  if (!sheet) {
-    sheet = ss.insertSheet('Ticket_AI_Data');
-    sheet.appendRow([
-      'ticket_id', 'company_id', 'created_at', 'processed_at', 'subject_original', 
-      'proposed_subject', 'summary', 'issue_type', 'integration', 'product_area', 
-      'platform', 'severity', 'resolution', 'sentiment', 'status', 'tags'
-    ]);
-  }
-  
-  sheet.appendRow([
-    ticket.id,
-    ticket.company_id || '',
-    ticket.created_at,
-    new Date().toISOString(),
-    ticket.subject,
-    aiResult.proposed_subject,
-    aiResult.summary,
-    aiResult.issue_type,
-    aiResult.integration,
-    aiResult.product_area,
-    aiResult.platform,
-    aiResult.severity,
-    aiResult.resolution,
-    aiResult.sentiment,
-    ticket.status,
-    aiResult.tags_to_add.join(', ')
-  ]);
-}
-
-function logAiProcessing(ticketId, status, actionOrError, dryRun, aiResult) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('AI_Processing_Log');
-  if (!sheet) {
-    sheet = ss.insertSheet('AI_Processing_Log');
-    // 8-column header: includes proposed_subject + summary for dry-run audit preview
-    sheet.appendRow(['timestamp', 'ticket_id', 'action', 'status', 'error_message', 'dry_run', 'proposed_subject', 'summary']);
-  }
-
-  var props = PropertiesService.getScriptProperties();
-  var triggeredBy = props.getProperty('AI_Batch_TriggeredBy') || 'Unknown';
-
-  var proposedSubject = '';
-  var summary = '';
-  if (status === 'success' && aiResult) {
-    proposedSubject = aiResult.proposed_subject || '';
-    // Truncate summary to 500 chars to avoid giant cells
-    summary = (aiResult.summary || '').substring(0, 500);
-  }
-
-  var actionStr;
-  if (status === 'success') actionStr = actionOrError;
-  else if (status === 'skipped') actionStr = 'skipped';
-  else actionStr = 'processing_failed';
-
-  sheet.appendRow([
-    new Date().toISOString(),
-    ticketId,
-    actionStr + ' [by: ' + triggeredBy + ']',
-    status,
-    (status === 'error' || status === 'skipped') ? actionOrError : '',
-    dryRun ? 'TRUE' : 'FALSE',
-    proposedSubject,
-    summary
-  ]);
-}
-
-// ============================================================================
-// DIAGNOSTIC & TEST HELPERS
-// ============================================================================
-
-/**
- * STEP 1 — Run this FIRST.
- * Dumps every custom field name and current value from a real ticket.
- * This confirms the exact API field names (cf_revised_subject_name, etc.)
- * before we attempt any writes.
- *
- * HOW TO USE:
- *   1. Open Google Apps Script
- *   2. Select "inspectTicketFields" from the function dropdown
- *   3. Click Run
- *   4. Open "Execution Log" and look for the custom_fields section
- */
-function inspectTicketFields() {
-  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-  var domain = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
-
-  // Fetch the 5 most recent tickets to find one that's not an OOO
-  var url = 'https://' + domain + '/api/v2/tickets?per_page=5&order_by=created_at&order_type=desc';
-  var res = UrlFetchApp.fetch(url, fdOpts);
-  var tkts = JSON.parse(res.getContentText());
-
-  var target = null;
-  for (var i = 0; i < tkts.length; i++) {
-    var subj = (tkts[i].subject || '').toLowerCase();
-    if (subj.indexOf('out of office') === -1 && subj.indexOf('auto') === -1) {
-      target = tkts[i];
-      break;
-    }
-  }
-
-  if (!target) {
-    Logger.log('❌ No suitable test ticket found in the last 5 tickets.');
-    return;
-  }
-
-  Logger.log('=== TICKET FIELD INSPECTION ===');
-  Logger.log('Ticket ID   : ' + target.id);
-  Logger.log('Subject     : ' + target.subject);
-  Logger.log('Status      : ' + target.status);
-  Logger.log('Tags        : ' + JSON.stringify(target.tags));
-  Logger.log('');
-  Logger.log('--- ALL CUSTOM FIELDS ---');
-
-  var cf = target.custom_fields || {};
-  var keys = Object.keys(cf);
-  if (keys.length === 0) {
-    Logger.log('(no custom fields found on this ticket)');
-  } else {
-    keys.forEach(function(k) {
-      Logger.log('  ' + k + ' = ' + JSON.stringify(cf[k]));
-    });
-  }
-
-  Logger.log('');
-  Logger.log('=== EXPECTED WRITE TARGETS ===');
-  Logger.log('  cf_revised_subject_name : ' + (cf.hasOwnProperty('cf_revised_subject_name') ? '✅ EXISTS (current: ' + cf['cf_revised_subject_name'] + ')' : '❌ NOT FOUND — check field name in FD Admin'));
-  Logger.log('  cf_ai_summary_notes     : ' + (cf.hasOwnProperty('cf_ai_summary_notes')     ? '✅ EXISTS (current: ' + cf['cf_ai_summary_notes']     + ')' : '❌ NOT FOUND — check field name in FD Admin'));
-  Logger.log('');
-  Logger.log('→ Use ticket ID ' + target.id + ' in testSingleTicketLive() below');
-}
-
-
-/**
- * STEP 2 — Run this after inspectTicketFields confirms field names are correct.
- * Processes ONE ticket end-to-end:
- *   - Calls Gemini AI to analyze the ticket thread
- *   - Writes cf_revised_subject_name + cf_ai_summary_notes to Freshdesk (LIVE)
- *   - Logs exactly what was sent and what Freshdesk replied
- *
- * HOW TO USE:
- *   1. Replace TICKET_ID_HERE with the ID from inspectTicketFields output
- *   2. Select "testSingleTicketLive" from the dropdown and click Run
- *   3. Check the Execution Log AND open that ticket in Freshdesk to confirm
- */
-function testSingleTicketLive() {
-  var TICKET_ID = 90958; // ← REPLACE with a real ticket ID from inspectTicketFields
-
-  Logger.log('🚀 Starting live test on ticket #' + TICKET_ID);
-  Logger.log('   (dryRun = FALSE — this WILL write to Freshdesk)');
-  Logger.log('');
-
-  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-  var domain = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
-  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + TICKET_ID, fdOpts);
-  if (res.getResponseCode() === 200) {
-    var t = JSON.parse(res.getContentText());
-    Logger.log('=== TARGET TICKET CUSTOM FIELDS ===');
-    var cf = t.custom_fields || {};
-    Object.keys(cf).forEach(function(k) {
-      Logger.log('  ' + k + ' = ' + JSON.stringify(cf[k]));
-    });
-    Logger.log('===================================');
-  }
-
-  try {
-    var result = processTicket(TICKET_ID, false); // dryRun = false → writes for real
-    Logger.log('=== RESULT ===');
-    Logger.log(JSON.stringify(result, null, 2));
-
-    if (result.status === 'success') {
-      Logger.log('');
-      Logger.log('✅ SUCCESS! Now open this ticket in Freshdesk to verify:');
-      Logger.log('   https://runnertech.freshdesk.com/a/tickets/' + TICKET_ID);
-      Logger.log('');
-      Logger.log('In the properties panel on the right, you should see:');
-      Logger.log('  Revised Subject Name : ' + (result.ai_result ? result.ai_result.proposed_subject : '(check log)'));
-      Logger.log('  AI Summary Notes     : (first 100 chars) ' + (result.ai_result && result.ai_result.summary ? result.ai_result.summary.substring(0, 100) + '...' : '(check log)'));
-    } else {
-      Logger.log('');
-      Logger.log('❌ FAILED. Error message: ' + result.message);
-      Logger.log('Common causes:');
-      Logger.log('  - Custom field name mismatch (run inspectTicketFields first)');
-      Logger.log('  - Ticket was already processed (has ai: tags or cf_ai_summary_notes)');
-      Logger.log('  - Gemini API key missing or rate limited');
-    }
-  } catch(e) {
-    Logger.log('❌ Exception: ' + e.message);
-    Logger.log(e.stack);
-  }
-}
-
-
-/**
- * UTILITY — Finds a recent ticket suitable for testing (no OOO, no ai: tags, no prior AI processing).
- * Run this if you are unsure which ticket to use for testSingleTicketLive.
- */
-function findTestableTicket() {
-  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-  var domain = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
-
-  var url = 'https://' + domain + '/api/v2/tickets?per_page=20&order_by=created_at&order_type=desc';
-  var res = UrlFetchApp.fetch(url, fdOpts);
-  var tkts = JSON.parse(res.getContentText());
-
-  Logger.log('=== TESTABLE TICKETS (not OOO, not already AI-processed) ===');
-  var found = 0;
-  tkts.forEach(function(t) {
-    var subj = (t.subject || '').toLowerCase();
-    if (subj.indexOf('out of office') !== -1 || subj.indexOf('automatic reply') !== -1 || subj.indexOf('auto-reply') !== -1) return;
-
-    var tags = t.tags || [];
-    var alreadyDone = tags.some(function(tag) { return tag.toLowerCase().indexOf('ai:') === 0; });
-    var cf = t.custom_fields || {};
-    if (alreadyDone || cf['cf_ai_summary_notes']) return;
-
-    Logger.log('  ID: ' + t.id + ' | Subject: ' + t.subject);
-    found++;
-  });
-
-  if (found === 0) Logger.log('  (All recent 20 tickets are either OOO or already processed)');
-  Logger.log('');
-  Logger.log('→ Copy any ID above into testSingleTicketLive()');
-}
-
 // ============================================================================
 // BATCH PROCESSING
 // ============================================================================
@@ -1746,47 +1129,6 @@ function getBatchAiStatus() {
     triggeredBy:      props.getProperty('AI_Batch_TriggeredBy') || '',
     dryRun:           props.getProperty('AI_Batch_DryRun') === 'true'
   };
-}
-
-// ── Ticket types that should never be AI-processed (noise) ────
-var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
-
-var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847];
-
-var NOISE_SUBJECT_PHRASES = [
-  'out of office',
-  'automatic reply',
-  'auto-reply',
-  'vacation',
-  'autoreply',
-  'oracle: security notification',
-  'uptime robot',
-  'zoom',
-  'tempo',
-  'basecamp',
-  'rejected posting to infdba',
-  'runner edq: holiday reminder',
-  'your service request has been received and will be assigned',
-  'confluence',
-  'recall:',
-  'passcode',
-  'new voicemail',
-  'unused transaction pool expires',
-  'melissa product news',
-  'melissa data subscription update',
-  'file is complete and updated',
-  'completed file posted on ftp',
-  'transactions low'
-];
-
-function isNoiseSubject(subject) {
-  if (!subject) return false;
-  var s = subject.toLowerCase();
-  for (var i = 0; i < NOISE_SUBJECT_PHRASES.length; i++) {
-    if (s.indexOf(NOISE_SUBJECT_PHRASES[i]) !== -1) return true;
-  }
-  if (s.indexOf('runner edq') !== -1 && s.indexOf('celebration') !== -1) return true;
-  return false;
 }
 
 function batchProcessTickets(dryRun) {
@@ -2164,49 +1506,6 @@ function runBatchAudit(daysBack, startDateStr, endDateStr) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// ONE-TIME CLEANUP: Removes incorrectly processed noise tickets
-// from both Ticket_AI_Data and AI_Processing_Log sheets.
-// Run once from Apps Script editor after redeployment.
-// ─────────────────────────────────────────────────────────────────────────
-function removeNoiseTicketsFromSheet() {
-  var TICKETS_TO_REMOVE = ['90819', '90789', '90790', '90800', '90802', '90844', '90859', '90861', '91057', '90791', '90855', '90847', '90735', '90738', '90739', '90745', '90746', '90757', '90760', '90761', '90763', '90768', '90972'];
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var removedAiData = 0;
-  var removedLog    = 0;
-
-  // ── Clean Ticket_AI_Data ─────────────────────────────────────
-  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
-  if (aiSheet) {
-    var aiData = aiSheet.getDataRange().getValues();
-    // Iterate from bottom up so row deletions don't shift indices
-    for (var i = aiData.length - 1; i >= 1; i--) {
-      var tid = String(aiData[i][0]).trim();
-      if (TICKETS_TO_REMOVE.indexOf(tid) !== -1) {
-        aiSheet.deleteRow(i + 1); // sheet rows are 1-indexed
-        removedAiData++;
-      }
-    }
-  }
-
-  // ── Clean AI_Processing_Log ──────────────────────────────────
-  var logSheet = ss.getSheetByName('AI_Processing_Log');
-  if (logSheet) {
-    var logData = logSheet.getDataRange().getValues();
-    for (var j = logData.length - 1; j >= 1; j--) {
-      var ltid = String(logData[j][1]).trim(); // column B = ticket_id
-      if (TICKETS_TO_REMOVE.indexOf(ltid) !== -1) {
-        logSheet.deleteRow(j + 1);
-        removedLog++;
-      }
-    }
-  }
-
-  var msg = 'Cleanup complete. Removed ' + removedAiData + ' rows from Ticket_AI_Data and ' + removedLog + ' rows from AI_Processing_Log.';
-  Logger.log(msg);
-}
-
 
 // Shows processed / failed / skipped breakdown + partial-success
 // note if failures occurred.
@@ -2276,6 +1575,1006 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
  * Utility to mass-remove AI modifications from specific noise tickets.
  * Reverts the subject, removes ai: tags, and deletes AI Summary notes.
  */
+
+
+// ==========================================================================
+// FILE: Router.gs
+// ==========================================================================
+
+
+function doGet(e) {
+  var sheetName = 'Form Responses 1';
+
+  if (e && e.parameter) {
+
+    // ----------------------------------------------------------------
+    // TYPE: contacts — GET proxy for Outreach modal (bypasses POST redirect issue)
+    // ----------------------------------------------------------------
+    if (e.parameter.type === 'contacts') {
+      var companyName = e.parameter.companyName || '';
+      if (!companyName) {
+        return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'companyName required', gs_version: '1.3' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+      var domain = 'runnertech.freshdesk.com';
+      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+      var fdOpts = { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true };
+
+      // Find company
+      var companyId = null;
+      var sRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/companies/autocomplete?name=' + encodeURIComponent(companyName), fdOpts);
+      if (sRes.getResponseCode() === 200) {
+        var sRaw = JSON.parse(sRes.getContentText());
+        var cos = Array.isArray(sRaw) ? sRaw : (sRaw.companies || []);
+        if (cos.length > 0) companyId = cos[0].id;
+      }
+      if (!companyId) {
+        var listRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/companies?per_page=100', fdOpts);
+        if (listRes.getResponseCode() === 200) {
+          var allCos = JSON.parse(listRes.getContentText());
+          var needle = companyName.toLowerCase().substring(0, 12);
+          for (var ci = 0; ci < allCos.length; ci++) {
+            if (allCos[ci].name && allCos[ci].name.toLowerCase().indexOf(needle) !== -1) { companyId = allCos[ci].id; break; }
+          }
+        }
+      }
+      if (!companyId) {
+        return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Company not found: ' + companyName, gs_version: '1.3' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      // Get ticket dates by contact
+      var tByUser = {};
+      var tRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets?company_id=' + companyId + '&per_page=100', fdOpts);
+      if (tRes.getResponseCode() === 200) {
+        var tkts = JSON.parse(tRes.getContentText());
+        for (var ti = 0; ti < tkts.length; ti++) {
+          var t = tkts[ti];
+          if (t.requester_id) {
+            var td = new Date(t.created_at).getTime();
+            if (!tByUser[t.requester_id] || td > tByUser[t.requester_id]) tByUser[t.requester_id] = td;
+          }
+        }
+      }
+
+      // Get and filter contacts
+      var validContacts = [];
+      var cRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/contacts?company_id=' + companyId + '&per_page=100', fdOpts);
+      if (cRes.getResponseCode() === 200) {
+        var cts = JSON.parse(cRes.getContentText());
+        for (var i = 0; i < cts.length; i++) {
+          var c = cts[i];
+          var cn = (c.name || '').toLowerCase();
+          if (cn.indexOf('- do not contact') !== -1 || cn.indexOf('- retired') !== -1 || cn.indexOf(' retired') !== -1) continue;
+          if (!c.email) continue;
+          validContacts.push({ id: c.id, name: c.name, email: c.email, job_title: c.job_title || '', lastTicketTime: tByUser[c.id] || 0 });
+        }
+      }
+      validContacts.sort(function(a, b) {
+        if (a.lastTicketTime > 0 && b.lastTicketTime > 0) return b.lastTicketTime - a.lastTicketTime;
+        if (a.lastTicketTime > 0) return -1;
+        if (b.lastTicketTime > 0) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', data: { companyId: companyId, contacts: validContacts }, gs_version: '1.3' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (e.parameter.type === 'freshdesk') {
+      sheetName = 'Freshdesk_Data';
+    } else if (e.parameter.type === 'triage') {
+      sheetName = 'Triage_Data';
+    } else if (e.parameter.type === 'ticket_trends') {
+      sheetName = 'Ticket_AI_Data';
+    } else if (e.parameter.type === 'ai_log') {
+      sheetName = 'AI_Processing_Log';
+    } else if (e.parameter.type === 'ai_status') {
+      // ----------------------------------------------------------------
+      // TYPE: ai_status — Returns the current state of the batch processor
+      // ----------------------------------------------------------------
+      var status = getBatchAiStatus();
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: status }))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (e.parameter.type === 'permissions') {
+      // ----------------------------------------------------------------
+      // TYPE: permissions - Returns user permissions and (if admin) all users
+      // ----------------------------------------------------------------
+      var email = e.parameter.email || '';
+      var perms = getUserPermissions(email);
+      
+      var response = { status: 'success', permissions: perms };
+      
+      // If admin, fetch all users from User_Permissions sheet
+      if (perms.role === 'admin') {
+        var allUsers = [];
+        try {
+          var ss = SpreadsheetApp.getActiveSpreadsheet();
+          var sheet = ss.getSheetByName('User_Permissions');
+          if (sheet) {
+            var data = sheet.getDataRange().getValues();
+            for (var i = 1; i < data.length; i++) {
+              allUsers.push({
+                name: String(data[i][0]).trim(),
+                email: String(data[i][1]).toLowerCase().trim(),
+                role: String(data[i][2]).toLowerCase().trim(),
+                canAccessData: String(data[i][3]).toLowerCase() === 'true',
+                canAccessIntel: String(data[i][4]).toLowerCase() === 'true'
+              });
+            }
+          }
+        } catch (err) {
+          Logger.log("Error fetching all users: " + err);
+        }
+        response.allUsers = allUsers;
+      }
+      
+      return ContentService.createTextOutput(JSON.stringify(response))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+
+  if (!sheet) {
+    return ContentService.createTextOutput('Error: Sheet "' + sheetName + '" not found')
+      .setMimeType(ContentService.MimeType.TEXT);
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var csvLines = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var csvRow = [];
+
+    for (var j = 0; j < row.length; j++) {
+      var cell = row[j];
+      var cellValue = '';
+
+      if (cell instanceof Date) {
+        cellValue = cell.toISOString();
+      } else if (cell === null || cell === undefined) {
+        cellValue = '';
+      } else {
+        cellValue = String(cell);
+      }
+
+      cellValue = cellValue.replace(/[\r\n]+/g, ' ');
+      cellValue = cellValue.replace(/"/g, '""');
+
+      if (cellValue.indexOf(',') !== -1 || cellValue.indexOf('"') !== -1 || cellValue.indexOf(' ') !== -1) {
+        cellValue = '"' + cellValue + '"';
+      }
+
+      csvRow.push(cellValue);
+    }
+
+    csvLines.push(csvRow.join(','));
+  }
+
+  return ContentService.createTextOutput(csvLines.join('\n'))
+    .setMimeType(ContentService.MimeType.CSV);
+}
+
+
+function doPost(e) {
+  try {
+    var postData = JSON.parse(e.postData.contents);
+    var action = postData.action || 'triage';
+
+    // ----------------------------------------------------------------
+    // ACTION: sendpin  — generate & email a 6-digit login PIN
+    // ----------------------------------------------------------------
+    if (action === 'sendpin') {
+      var email = (postData.email || '').toLowerCase().trim();
+      var name  = postData.name || 'there';
+
+      if (!email) {
+        return jsonResponse('error', 'Email is required.');
+      }
+
+      var pin = Math.floor(100000 + Math.random() * 900000).toString();
+      var expires = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min expiry
+
+      // Store the PIN in a Login_Pins sheet (create if needed)
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var pinSheet = ss.getSheetByName('Login_Pins');
+      if (!pinSheet) {
+        pinSheet = ss.insertSheet('Login_Pins');
+        pinSheet.appendRow(['Email', 'Pin', 'Expires', 'Used']);
+      }
+
+      // Remove any old entries for this email
+      var lastRow = pinSheet.getLastRow();
+      if (lastRow > 1) {
+        var emailCol = pinSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (var i = emailCol.length - 1; i >= 0; i--) {
+          if (emailCol[i][0].toString().toLowerCase() === email) {
+            pinSheet.deleteRow(i + 2);
+          }
+        }
+      }
+
+      // Append new PIN row
+      pinSheet.appendRow([email, pin, expires, 'false']);
+
+      // Send the PIN by email
+      var subject = 'Your Customer Health Dashboard Login Code';
+      var body = 'Hello ' + name + ',\n\n' +
+                 'Your verification code is:\n\n' +
+                 '    ' + pin + '\n\n' +
+                 'This code will expire in 10 minutes.\n\n' +
+                 'If you did not request this code, please ignore this email.\n\n' +
+                 'Best,\nRunner Technologies Customer Success';
+
+      MailApp.sendEmail(email, subject, body);
+
+      return jsonResponse('success', 'PIN sent.');
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: verifypin — check the PIN and mark it used
+    // ----------------------------------------------------------------
+    if (action === 'verifypin') {
+      var email = (postData.email || '').toLowerCase().trim();
+      var pin   = (postData.pin   || '').trim();
+
+      if (!email || !pin) {
+        return jsonResponse('error', 'Email and PIN are required.');
+      }
+
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var pinSheet = ss.getSheetByName('Login_Pins');
+      if (!pinSheet) {
+        return jsonResponse('error', 'No PINs have been generated yet.');
+      }
+
+      var lastRow = pinSheet.getLastRow();
+      if (lastRow < 2) {
+        return jsonResponse('error', 'No PINs have been generated yet.');
+      }
+
+      var rows = pinSheet.getRange(2, 1, lastRow - 1, 4).getValues();
+      var now  = new Date();
+
+      for (var i = 0; i < rows.length; i++) {
+        var rowEmail   = rows[i][0].toString().toLowerCase().trim();
+        var rowPin     = rows[i][1].toString().trim();
+        var rowExpires = new Date(rows[i][2]);
+        var rowUsed    = rows[i][3].toString();
+
+        if (rowEmail === email && rowPin === pin) {
+          if (rowUsed === 'true') {
+            return jsonResponse('error', 'This code has already been used.');
+          }
+          if (now > rowExpires) {
+            return jsonResponse('error', 'This code has expired. Please request a new one.');
+          }
+          // Mark as used
+          pinSheet.getRange(i + 2, 4).setValue('true');
+          return jsonResponse('success', 'PIN verified.');
+        }
+      }
+
+      return jsonResponse('error', 'Incorrect code. Please try again.');
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: AI Batch Job Controls
+    // ----------------------------------------------------------------
+    if (action === 'start_batch_ai') {
+      var triggeredByEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(triggeredByEmail)) {
+        return jsonResponse('error', 'Access denied. Only authorized admins can run batch jobs. Contact Misty Wilmore.');
+      }
+      var dryRun = postData.dryRun === true;
+      var overwrite = postData.overwrite === true;
+      var limit = postData.limit || 0;
+      var daysBack = postData.daysBack || 365;
+      var startDate = postData.startDate || '';
+      var endDate = postData.endDate || '';
+      var triggeredBy = postData.triggeredBy || 'Unknown';
+      startBatchAiJob(dryRun, overwrite, triggeredBy, triggeredByEmail, limit, daysBack, startDate, endDate);
+      return jsonResponse('success', 'Batch job started (dryRun: ' + dryRun + ', overwrite: ' + overwrite + ', by: ' + triggeredBy + ', limit: ' + limit + ').');
+    }
+    
+    if (action === 'run_batch_audit') {
+      var auditCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(auditCallerEmail)) {
+        return jsonResponse('error', 'Access denied.');
+      }
+      var daysBack = postData.daysBack || 365;
+      var startDate = postData.startDate || '';
+      var endDate = postData.endDate || '';
+      runBatchAudit(daysBack, startDate, endDate);
+      return jsonResponse('success', 'Audit complete. Check the Audit_Report tab.');
+    }
+    
+    if (action === 'stop_batch_ai') {
+      var stopCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(stopCallerEmail)) {
+        return jsonResponse('error', 'Access denied.');
+      }
+      stopBatchAiJob();
+      return jsonResponse('success', 'Batch job stopped.');
+    }
+
+    // ── Manual single-ticket processing ──────────────────────
+    if (action === 'process_single_ticket') {
+      var callerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(callerEmail)) {
+        return jsonResponse('error', 'Access denied. Only authorized admins can process tickets manually.');
+      }
+      var ticketId = postData.ticketId ? String(postData.ticketId).trim() : '';
+      if (!ticketId || isNaN(Number(ticketId))) {
+        return jsonResponse('error', 'Invalid ticketId. Please provide a numeric Freshdesk ticket ID.');
+      }
+      var forceReprocess = postData.forceReprocess === true;
+      var callerName = postData.triggeredBy || 'Unknown';
+      // Temporarily set audit props so logAiProcessing captures the right user
+      var props = PropertiesService.getScriptProperties();
+      props.setProperty('AI_Batch_TriggeredBy', callerName);
+      props.setProperty('AI_Batch_TriggeredByEmail', callerEmail);
+      var result = processTicketById(ticketId, false, forceReprocess);
+      return jsonResponse(result.status, result.message || result.status, result.ai_result);
+    }
+
+    // ── Retry all failed tickets from AI_Processing_Log ──────
+    if (action === 'retry_failed_tickets') {
+      var retryCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(retryCallerEmail)) {
+        return jsonResponse('error', 'Access denied.');
+      }
+      var retryCallerName = postData.triggeredBy || 'Unknown';
+      var retryCount = retryFailedTicketsJob(retryCallerName, retryCallerEmail);
+      return jsonResponse('success', 'Queued ' + retryCount + ' failed ticket(s) for reprocessing.');
+    }
+
+    // ── AI Queue Action Handlers ─────────────────────────────
+    if (action === 'override_ai_classification') {
+      var overrideCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(overrideCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      var newSubject = postData.newSubject;
+      var newIntegration = postData.newIntegration;
+      var newProduct = postData.newProduct;
+      
+      var customFields = {
+        cf_ai_proposed_subject: newSubject,
+        cf_ai_integration: newIntegration,
+        cf_ai_product_area: newProduct
+      };
+      
+      var res = updateFreshdeskTicketFields(ticketId, customFields);
+      if (res && res.status === 'success') {
+        updateTicketAiDataRow(ticketId, {
+          proposed_subject: newSubject,
+          integration: newIntegration,
+          product_area: newProduct
+        });
+        return jsonResponse('success', 'Override saved.');
+      }
+      return jsonResponse('error', 'Failed to update Freshdesk: ' + (res ? res.message : 'Unknown error'));
+    }
+
+    if (action === 'skip_ai_ticket') {
+      var skipCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(skipCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      var res = updateFreshdeskTicketTags(ticketId, ['ai:skipped']);
+      if (res && res.status === 'success') {
+        deleteTicketAiDataRow(ticketId);
+        logAiProcessing(ticketId, 'skipped', 'Skipped via UI review', false, null);
+        return jsonResponse('success', 'Ticket skipped.');
+      }
+      return jsonResponse('error', 'Failed to add tag to Freshdesk.');
+    }
+
+    if (action === 'dismiss_ai_ticket') {
+      var dismissCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(dismissCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      var res = updateFreshdeskTicketTags(ticketId, ['ai:reviewed']);
+      if (res && res.status === 'success') {
+        addTagToTicketAiDataRow(ticketId, 'ai:reviewed');
+        return jsonResponse('success', 'Ticket dismissed from queue.');
+      }
+      return jsonResponse('error', 'Failed to add tag to Freshdesk.');
+    }
+
+    if (action === 'reprocess_ai_ticket') {
+      var reprocessCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(reprocessCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      
+      var customFields = { cf_ai_proposed_subject: null, cf_ai_summary_notes: null, cf_ai_product_area: null, cf_ai_integration: null, cf_ai_severity: null };
+      updateFreshdeskTicketFields(ticketId, customFields);
+      removeFreshdeskAiTags(ticketId);
+      deleteTicketAiDataRow(ticketId);
+      
+      var props = PropertiesService.getScriptProperties();
+      props.setProperty('AI_Batch_TriggeredBy', postData.triggeredBy || 'Unknown');
+      props.setProperty('AI_Batch_TriggeredByEmail', reprocessCallerEmail);
+      var result = processTicketById(ticketId, false, true);
+      
+      return jsonResponse(result.status, 'Reprocessed ticket.');
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: get_outreach_contacts
+    // ----------------------------------------------------------------
+    if (action === 'get_outreach_contacts') {
+      var companyName = postData.companyName;
+      if (!companyName) return jsonResponse('error', 'Company Name missing.');
+
+      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+      var domain = 'runnertech.freshdesk.com';
+      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+      var options = { 'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' }, 'muteHttpExceptions': true };
+      
+      // 0. Resolve the Company Name into a Freshdesk Company ID
+      // The autocomplete endpoint returns a flat array of company objects
+      var companySearchUrl = 'https://' + domain + '/api/v2/companies/autocomplete?name=' + encodeURIComponent(companyName);
+      var searchRes = UrlFetchApp.fetch(companySearchUrl, options);
+      var companyId = null;
+      
+      if (searchRes.getResponseCode() === 200) {
+        var searchRaw = JSON.parse(searchRes.getContentText());
+        // Handle both flat array and {companies:[]} response formats
+        var companies = Array.isArray(searchRaw) ? searchRaw : (searchRaw.companies || []);
+        if (companies.length > 0) {
+          companyId = companies[0].id;
+        }
+      }
+      
+      // Fallback: search via the companies list API if autocomplete failed
+      if (!companyId) {
+        var listUrl = 'https://' + domain + '/api/v2/companies?page=1&per_page=100';
+        var listRes = UrlFetchApp.fetch(listUrl, options);
+        if (listRes.getResponseCode() === 200) {
+          var allCompanies = JSON.parse(listRes.getContentText());
+          var nameLower = companyName.toLowerCase();
+          for (var ci = 0; ci < allCompanies.length; ci++) {
+            if (allCompanies[ci].name && allCompanies[ci].name.toLowerCase().indexOf(nameLower.substring(0, 10)) !== -1) {
+              companyId = allCompanies[ci].id;
+              break;
+            }
+          }
+        }
+      }
+      
+      if (!companyId) return jsonResponse('error', 'Company not found in Freshdesk: ' + companyName);
+
+      // 1. Fetch recent tickets to determine active submitters
+      var ticketDatesByUser = {};
+      var ticketUrl = 'https://' + domain + '/api/v2/tickets?company_id=' + companyId + '&per_page=100';
+      var ticketRes = UrlFetchApp.fetch(ticketUrl, options);
+      if (ticketRes.getResponseCode() === 200) {
+        var tickets = JSON.parse(ticketRes.getContentText());
+        for (var i = 0; i < tickets.length; i++) {
+           var t = tickets[i];
+           if (t.requester_id) {
+             var tDate = new Date(t.created_at).getTime();
+             if (!ticketDatesByUser[t.requester_id] || tDate > ticketDatesByUser[t.requester_id]) {
+                ticketDatesByUser[t.requester_id] = tDate;
+             }
+           }
+        }
+      }
+
+      // 2. Fetch contacts for this company
+      var contactsUrl = 'https://' + domain + '/api/v2/contacts?company_id=' + companyId + '&per_page=100';
+      var contactsRes = UrlFetchApp.fetch(contactsUrl, options);
+      var validContacts = [];
+      if (contactsRes.getResponseCode() === 200) {
+         var contacts = JSON.parse(contactsRes.getContentText());
+         for (var i = 0; i < contacts.length; i++) {
+           var c = contacts[i];
+           var cname = c.name ? c.name.toLowerCase() : '';
+           var cemail = c.email ? c.email : '';
+           
+           if (cname.indexOf('- do not contact') !== -1 || cname.indexOf('- retired') !== -1 || cname.indexOf(' retired') !== -1) continue;
+           if (!cemail) continue;
+
+           validContacts.push({
+             id: c.id,
+             name: c.name,
+             email: c.email,
+             job_title: c.job_title || '',
+             lastTicketTime: ticketDatesByUser[c.id] || 0
+           });
+         }
+      }
+
+      // 3. Sort: Has tickets first (newest to oldest), then no tickets
+      validContacts.sort(function(a, b) {
+         if (a.lastTicketTime > 0 && b.lastTicketTime > 0) return b.lastTicketTime - a.lastTicketTime;
+         if (a.lastTicketTime > 0) return -1;
+         if (b.lastTicketTime > 0) return 1;
+         return a.name.localeCompare(b.name);
+      });
+
+      return jsonResponse('success', { contacts: validContacts });
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: save_permissions
+    // ----------------------------------------------------------------
+    if (action === 'save_permissions') {
+      var callerEmail = postData.triggeredByEmail || '';
+      var perms = getUserPermissions(callerEmail);
+      if (perms.role !== 'admin') {
+        return jsonResponse('error', 'Access denied. Only Admins can save permissions.');
+      }
+      
+      var users = postData.users || [];
+      try {
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        var sheet = ss.getSheetByName('User_Permissions');
+        if (!sheet) {
+          return jsonResponse('error', 'User_Permissions sheet not found.');
+        }
+        
+        // Clear all rows except header
+        var lastRow = sheet.getLastRow();
+        if (lastRow > 1) {
+          sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+        }
+        
+        // Write new users
+        if (users.length > 0) {
+          var newRows = [];
+          for (var i = 0; i < users.length; i++) {
+            var u = users[i];
+            // Format: Name, Email, Role, Can_Access_Data_Table, Can_Access_Ticket_Intel
+            newRows.push([
+              u.name,
+              u.email,
+              u.role,
+              u.canAccessData ? 'TRUE' : 'FALSE',
+              u.canAccessIntel ? 'TRUE' : 'FALSE'
+            ]);
+          }
+          sheet.getRange(2, 1, newRows.length, 5).setValues(newRows);
+        }
+        return jsonResponse('success', 'Permissions saved successfully.');
+      } catch (err) {
+        return jsonResponse('error', 'Error saving permissions: ' + err.message);
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: sendoutreach
+    // ----------------------------------------------------------------
+    if (action === 'sendoutreach') {
+      var targetEmail = postData.email;
+      var targetName = postData.name || '';
+      var ccEmails = postData.cc || '';
+      var bccEmails = postData.bcc || '';
+      var subject = postData.subject || 'Checking in';
+      var body = postData.body || 'Hi,\nJust checking in.\n\nThanks';
+
+      if (!targetEmail) return jsonResponse('error', 'Missing target email.');
+
+      // Dynamic Distribution List Greeting Check
+      var eMatch = targetEmail.toLowerCase();
+      if (eMatch.indexOf('admin@') === 0 || eMatch.indexOf('info@') === 0 || eMatch.indexOf('it@') === 0 || eMatch.indexOf('support@') === 0 || eMatch.indexOf('team@') === 0 || targetName.trim() === '') {
+         body = body.replace(/Hi .*?,|Hi,/, 'Hi ' + (postData.company || 'Team') + ' Team,');
+      } else {
+         var firstName = targetName.split(' ')[0];
+         body = body.replace(/Hi .*?,|Hi,/, 'Hi ' + firstName + ',');
+      }
+
+      var mailOptions = {
+         replyTo: 'support@runnertechnologies.com'
+      };
+      if (ccEmails) mailOptions.cc = ccEmails;
+      if (bccEmails) mailOptions.bcc = bccEmails;
+
+      try {
+        GmailApp.sendEmail(targetEmail, subject, body, mailOptions);
+        return jsonResponse('success', 'Outreach sent successfully.');
+      } catch (err) {
+        return jsonResponse('error', 'Failed to dispatch email: ' + err.toString());
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: addcontact
+    // ----------------------------------------------------------------
+    if (action === 'addcontact') {
+      var companyId = postData.companyId;
+      var addname = postData.name;
+      var addemail = postData.email;
+      var addtitle = postData.title || '';
+
+      if (!companyId || !addname || !addemail) return jsonResponse('error', 'Missing required fields.');
+
+      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+      
+      var payload = {
+         name: addname,
+         email: addemail,
+         company_id: parseInt(companyId, 10)
+      };
+      if (addtitle) payload.job_title = addtitle;
+
+      var options = {
+        'method': 'post',
+        'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+        'payload': JSON.stringify(payload),
+        'muteHttpExceptions': true
+      };
+
+      var res = UrlFetchApp.fetch('https://runnertech.freshdesk.com/api/v2/contacts', options);
+      var respCode = res.getResponseCode();
+      var respText = res.getContentText();
+
+      if (respCode === 201 || respCode === 200) {
+         return jsonResponse('success', 'Contact added to Freshdesk.');
+      } else if (respCode === 400 && (respText.indexOf('duplicate_value') !== -1 || respText.indexOf('already exists') !== -1)) {
+         // Fallback: Link existing contact to this company
+         var searchUrl = 'https://runnertech.freshdesk.com/api/v2/contacts?email=' + encodeURIComponent(addemail);
+         var sRes = UrlFetchApp.fetch(searchUrl, { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true });
+         if (sRes.getResponseCode() === 200) {
+            var existingList = JSON.parse(sRes.getContentText());
+            if (existingList && existingList.length > 0) {
+               var contactId = existingList[0].id;
+               var updateUrl = 'https://runnertech.freshdesk.com/api/v2/contacts/' + contactId;
+               var updatePayload = { company_id: parseInt(companyId, 10) };
+               if (addtitle) updatePayload.job_title = addtitle;
+               
+               UrlFetchApp.fetch(updateUrl, {
+                 'method': 'put',
+                 'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+                 'payload': JSON.stringify(updatePayload),
+                 'muteHttpExceptions': true
+               });
+               return jsonResponse('success', 'Existing contact linked to this company.');
+            }
+         }
+      }
+      return jsonResponse('error', 'Failed to add contact to Freshdesk. ' + respText);
+    }
+
+    // ----------------------------------------------------------------
+    // ACTION: markContactInvalid
+    // ----------------------------------------------------------------
+    if (action === 'markContactInvalid') {
+      var emailToMark = postData.email;
+      if (!emailToMark) return jsonResponse('error', 'Missing email.');
+
+      var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+      var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+
+      var searchUrl = 'https://runnertech.freshdesk.com/api/v2/contacts?email=' + encodeURIComponent(emailToMark);
+      var sRes = UrlFetchApp.fetch(searchUrl, { 'headers': { 'Authorization': authHeader }, 'muteHttpExceptions': true });
+
+      if (sRes.getResponseCode() === 200) {
+         var existingList = JSON.parse(sRes.getContentText());
+         if (existingList && existingList.length > 0) {
+            var contactId = existingList[0].id;
+            var updateUrl = 'https://runnertech.freshdesk.com/api/v2/contacts/' + contactId;
+            var updatePayload = { 
+                custom_fields: { do_not_contact_: true } 
+            };
+            
+            var updateRes = UrlFetchApp.fetch(updateUrl, {
+              'method': 'put',
+              'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+              'payload': JSON.stringify(updatePayload),
+              'muteHttpExceptions': true
+            });
+            if (updateRes.getResponseCode() === 200) {
+                return jsonResponse('success', 'Contact marked as Do Not Contact in Freshdesk.');
+            } else {
+                return jsonResponse('error', 'Failed to update contact: ' + updateRes.getContentText());
+            }
+         } else {
+             return jsonResponse('error', 'Contact not found.');
+         }
+      } else {
+          return jsonResponse('error', 'Failed to search Freshdesk.');
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // DEFAULT ACTION: triage update (existing logic)
+    // ----------------------------------------------------------------
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Triage_Data");
+    if (!sheet) {
+      return jsonResponse('error', 'Triage_Data sheet not found.');
+    }
+
+    var uniqueId  = postData.uniqueId;
+    var company   = postData.company;
+    var field     = postData.field;
+    var value     = postData.value;
+    var user      = postData.user;
+    var email     = postData.email || "";
+    var note      = postData.note  || "";
+    var timestamp = new Date().toISOString();
+
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(["UniqueId", "Company", "Field", "Value", "Timestamp", "User", "Email", "Note"]);
+    }
+
+    sheet.appendRow([uniqueId, company, field, value, timestamp, user, email, note]);
+
+    // Email notification on CSM assignment
+    if (field === 'csm' && value !== 'Unassigned') {
+      var emailAddress = "";
+      if (value === "Misty Wilmore") {
+        emailAddress = "misty.wilmore@runnertechnologies.com";
+      } else if (value === "Tonja Jones") {
+        emailAddress = "tonja.jones@runnertechnologies.com";
+      }
+
+      if (emailAddress !== "") {
+        var subject = "New Customer Assignment: " + company;
+        var body = "Hello " + value + ",\n\n" +
+                   "You have been assigned as the CSM for " + company + " by " + user + " (" + email + ").\n\n" +
+                   "Please check the Customer Health Dashboard for more details.\n\n" +
+                   "Best,\nCustomer Success Team";
+        try {
+          GmailApp.sendEmail(emailAddress, subject, body, {
+            from: "customersuccess@runnertechnologies.com"
+          });
+        } catch(aliasError) {
+          MailApp.sendEmail(emailAddress, subject, body);
+        }
+      }
+    }
+
+    // Email notification for Exhausted Contacts
+    if (field === 'status' && value === 'Requires CS Review - DNC/Exhausted') {
+       var csmSearch = 'Unassigned';
+       var rData = sheet.getDataRange().getValues();
+       for (var r = rData.length - 1; r >= 1; r--) {
+         if (rData[r][0] == uniqueId && rData[r][2] == 'csm') {
+             csmSearch = rData[r][3];
+             break;
+         }
+       }
+       if (csmSearch !== 'Unassigned') {
+         var emailExhaust = "";
+         if (csmSearch === "Misty Wilmore") emailExhaust = "misty.wilmore@runnertechnologies.com";
+         else if (csmSearch === "Tonja Jones") emailExhaust = "tonja.jones@runnertechnologies.com";
+         
+         if (emailExhaust !== "") {
+            var subjectExhaust = "Outreach Alert: " + company + " Contacts Exhausted";
+            var bodyExhaust = "Hello " + csmSearch + ",\n\n" +
+                       "All known contacts for " + company + " have either failed the cadence or are marked Do Not Contact/Retired.\n\n" +
+                       "Please perform manual research to find a new contact. Once you find one, open the dashboard's Engagement Blackout View and click [+ Add Researched Contact] to seamlessly inject them into the cadence.\n\n" +
+                       "Best,\nCustomer Health Automation";
+            try {
+              GmailApp.sendEmail(emailExhaust, subjectExhaust, bodyExhaust, {
+                from: "customersuccess@runnertechnologies.com"
+              });
+            } catch(aliasError) {
+              MailApp.sendEmail(emailExhaust, subjectExhaust, bodyExhaust);
+            }
+         }
+       }
+    }
+
+    return jsonResponse('success', 'Triage saved.');
+
+  } catch (error) {
+    return jsonResponse('error', error.toString());
+  }
+}
+
+
+// Helper: return a standard JSON response
+function jsonResponse(status, message) {
+  return ContentService
+    .createTextOutput(JSON.stringify({ status: status, message: message, gs_version: '1.3' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ==========================================================================
+// FILE: Diagnostic.gs
+// ==========================================================================
+
+function inspectTicketFields() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
+
+  // Fetch the 5 most recent tickets to find one that's not an OOO
+  var url = 'https://' + domain + '/api/v2/tickets?per_page=5&order_by=created_at&order_type=desc';
+  var res = UrlFetchApp.fetch(url, fdOpts);
+  var tkts = JSON.parse(res.getContentText());
+
+  var target = null;
+  for (var i = 0; i < tkts.length; i++) {
+    var subj = (tkts[i].subject || '').toLowerCase();
+    if (subj.indexOf('out of office') === -1 && subj.indexOf('auto') === -1) {
+      target = tkts[i];
+      break;
+    }
+  }
+
+  if (!target) {
+    Logger.log('❌ No suitable test ticket found in the last 5 tickets.');
+    return;
+  }
+
+  Logger.log('=== TICKET FIELD INSPECTION ===');
+  Logger.log('Ticket ID   : ' + target.id);
+  Logger.log('Subject     : ' + target.subject);
+  Logger.log('Status      : ' + target.status);
+  Logger.log('Tags        : ' + JSON.stringify(target.tags));
+  Logger.log('');
+  Logger.log('--- ALL CUSTOM FIELDS ---');
+
+  var cf = target.custom_fields || {};
+  var keys = Object.keys(cf);
+  if (keys.length === 0) {
+    Logger.log('(no custom fields found on this ticket)');
+  } else {
+    keys.forEach(function(k) {
+      Logger.log('  ' + k + ' = ' + JSON.stringify(cf[k]));
+    });
+  }
+
+  Logger.log('');
+  Logger.log('=== EXPECTED WRITE TARGETS ===');
+  Logger.log('  cf_revised_subject_name : ' + (cf.hasOwnProperty('cf_revised_subject_name') ? '✅ EXISTS (current: ' + cf['cf_revised_subject_name'] + ')' : '❌ NOT FOUND — check field name in FD Admin'));
+  Logger.log('  cf_ai_summary_notes     : ' + (cf.hasOwnProperty('cf_ai_summary_notes')     ? '✅ EXISTS (current: ' + cf['cf_ai_summary_notes']     + ')' : '❌ NOT FOUND — check field name in FD Admin'));
+  Logger.log('');
+  Logger.log('→ Use ticket ID ' + target.id + ' in testSingleTicketLive() below');
+}
+
+
+/**
+ * STEP 2 — Run this after inspectTicketFields confirms field names are correct.
+ * Processes ONE ticket end-to-end:
+ *   - Calls Gemini AI to analyze the ticket thread
+ *   - Writes cf_revised_subject_name + cf_ai_summary_notes to Freshdesk (LIVE)
+ *   - Logs exactly what was sent and what Freshdesk replied
+ *
+ * HOW TO USE:
+ *   1. Replace TICKET_ID_HERE with the ID from inspectTicketFields output
+ *   2. Select "testSingleTicketLive" from the dropdown and click Run
+ *   3. Check the Execution Log AND open that ticket in Freshdesk to confirm
+ */
+function testSingleTicketLive() {
+  var TICKET_ID = 90958; // ← REPLACE with a real ticket ID from inspectTicketFields
+
+  Logger.log('🚀 Starting live test on ticket #' + TICKET_ID);
+  Logger.log('   (dryRun = FALSE — this WILL write to Freshdesk)');
+  Logger.log('');
+
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
+  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + TICKET_ID, fdOpts);
+  if (res.getResponseCode() === 200) {
+    var t = JSON.parse(res.getContentText());
+    Logger.log('=== TARGET TICKET CUSTOM FIELDS ===');
+    var cf = t.custom_fields || {};
+    Object.keys(cf).forEach(function(k) {
+      Logger.log('  ' + k + ' = ' + JSON.stringify(cf[k]));
+    });
+    Logger.log('===================================');
+  }
+
+  try {
+    var result = processTicket(TICKET_ID, false); // dryRun = false → writes for real
+    Logger.log('=== RESULT ===');
+    Logger.log(JSON.stringify(result, null, 2));
+
+    if (result.status === 'success') {
+      Logger.log('');
+      Logger.log('✅ SUCCESS! Now open this ticket in Freshdesk to verify:');
+      Logger.log('   https://runnertech.freshdesk.com/a/tickets/' + TICKET_ID);
+      Logger.log('');
+      Logger.log('In the properties panel on the right, you should see:');
+      Logger.log('  Revised Subject Name : ' + (result.ai_result ? result.ai_result.proposed_subject : '(check log)'));
+      Logger.log('  AI Summary Notes     : (first 100 chars) ' + (result.ai_result && result.ai_result.summary ? result.ai_result.summary.substring(0, 100) + '...' : '(check log)'));
+    } else {
+      Logger.log('');
+      Logger.log('❌ FAILED. Error message: ' + result.message);
+      Logger.log('Common causes:');
+      Logger.log('  - Custom field name mismatch (run inspectTicketFields first)');
+      Logger.log('  - Ticket was already processed (has ai: tags or cf_ai_summary_notes)');
+      Logger.log('  - Gemini API key missing or rate limited');
+    }
+  } catch(e) {
+    Logger.log('❌ Exception: ' + e.message);
+    Logger.log(e.stack);
+  }
+}
+
+
+/**
+ * UTILITY — Finds a recent ticket suitable for testing (no OOO, no ai: tags, no prior AI processing).
+ * Run this if you are unsure which ticket to use for testSingleTicketLive.
+ */
+function findTestableTicket() {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
+
+  var url = 'https://' + domain + '/api/v2/tickets?per_page=20&order_by=created_at&order_type=desc';
+  var res = UrlFetchApp.fetch(url, fdOpts);
+  var tkts = JSON.parse(res.getContentText());
+
+  Logger.log('=== TESTABLE TICKETS (not OOO, not already AI-processed) ===');
+  var found = 0;
+  tkts.forEach(function(t) {
+    var subj = (t.subject || '').toLowerCase();
+    if (subj.indexOf('out of office') !== -1 || subj.indexOf('automatic reply') !== -1 || subj.indexOf('auto-reply') !== -1) return;
+
+    var tags = t.tags || [];
+    var alreadyDone = tags.some(function(tag) { return tag.toLowerCase().indexOf('ai:') === 0; });
+    var cf = t.custom_fields || {};
+    if (alreadyDone || cf['cf_ai_summary_notes']) return;
+
+    Logger.log('  ID: ' + t.id + ' | Subject: ' + t.subject);
+    found++;
+  });
+
+  if (found === 0) Logger.log('  (All recent 20 tickets are either OOO or already processed)');
+  Logger.log('');
+  Logger.log('→ Copy any ID above into testSingleTicketLive()');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ONE-TIME CLEANUP: Removes incorrectly processed noise tickets
+// from both Ticket_AI_Data and AI_Processing_Log sheets.
+// Run once from Apps Script editor after redeployment.
+// ─────────────────────────────────────────────────────────────────────────
+function removeNoiseTicketsFromSheet() {
+  var TICKETS_TO_REMOVE = ['90819', '90789', '90790', '90800', '90802', '90844', '90859', '90861', '91057', '90791', '90855', '90847', '90735', '90738', '90739', '90745', '90746', '90757', '90760', '90761', '90763', '90768', '90972'];
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var removedAiData = 0;
+  var removedLog    = 0;
+
+  // ── Clean Ticket_AI_Data ─────────────────────────────────────
+  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
+  if (aiSheet) {
+    var aiData = aiSheet.getDataRange().getValues();
+    // Iterate from bottom up so row deletions don't shift indices
+    for (var i = aiData.length - 1; i >= 1; i--) {
+      var tid = String(aiData[i][0]).trim();
+      if (TICKETS_TO_REMOVE.indexOf(tid) !== -1) {
+        aiSheet.deleteRow(i + 1); // sheet rows are 1-indexed
+        removedAiData++;
+      }
+    }
+  }
+
+  // ── Clean AI_Processing_Log ──────────────────────────────────
+  var logSheet = ss.getSheetByName('AI_Processing_Log');
+  if (logSheet) {
+    var logData = logSheet.getDataRange().getValues();
+    for (var j = logData.length - 1; j >= 1; j--) {
+      var ltid = String(logData[j][1]).trim(); // column B = ticket_id
+      if (TICKETS_TO_REMOVE.indexOf(ltid) !== -1) {
+        logSheet.deleteRow(j + 1);
+        removedLog++;
+      }
+    }
+  }
+
+  var msg = 'Cleanup complete. Removed ' + removedAiData + ' rows from Ticket_AI_Data and ' + removedLog + ' rows from AI_Processing_Log.';
+  Logger.log(msg);
+}
 function revertNoiseTickets() {
   var ticketsToRevert = [90819, 90789, 90790, 90800, 90802, 90844, 90859, 90861, 91057, 90791, 90855, 90847, 90735, 90738, 90739, 90745, 90746, 90757, 90760, 90761, 90763, 90768, 90972];
   var domain = 'runnertech.freshdesk.com';
@@ -2358,124 +2657,6 @@ function revertNoiseTickets() {
   console.log("Cleanup Results:\n" + logMessages.join('\n'));
 }
 
-// ── UI Queue Helper Functions ─────────────────────────────────────────────
-function updateFreshdeskTicketFields(ticketId, customFields) {
-  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-  var domain = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  
-  var payload = { custom_fields: customFields };
-  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
-  var updateOptions = {
-    'method': 'put',
-    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-    'payload': JSON.stringify(payload),
-    'muteHttpExceptions': true
-  };
-  
-  var updateRes = UrlFetchApp.fetch(updateUrl, updateOptions);
-  if (updateRes.getResponseCode() === 200) return { status: 'success' };
-  return { status: 'error', message: updateRes.getContentText() };
-}
-
-function updateFreshdeskTicketTags(ticketId, tagsToAdd) {
-  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-  var domain = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
-  
-  // Get current tags
-  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, fdOpts);
-  if (res.getResponseCode() !== 200) return { status: 'error' };
-  var ticket = JSON.parse(res.getContentText());
-  var tags = ticket.tags || [];
-  
-  tagsToAdd.forEach(function(t) {
-    if (tags.indexOf(t) === -1) tags.push(t);
-  });
-  
-  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
-  var updateOptions = {
-    'method': 'put',
-    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-    'payload': JSON.stringify({ tags: tags }),
-    'muteHttpExceptions': true
-  };
-  var updateRes = UrlFetchApp.fetch(updateUrl, updateOptions);
-  if (updateRes.getResponseCode() === 200) return { status: 'success' };
-  return { status: 'error', message: updateRes.getContentText() };
-}
-
-function removeFreshdeskAiTags(ticketId) {
-  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
-  var domain = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
-  
-  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, fdOpts);
-  if (res.getResponseCode() !== 200) return;
-  var ticket = JSON.parse(res.getContentText());
-  var tags = ticket.tags || [];
-  var newTags = [];
-  for (var i = 0; i < tags.length; i++) {
-    if (tags[i].indexOf('ai:') !== 0) newTags.push(tags[i]);
-  }
-  
-  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
-  var updateOptions = {
-    'method': 'put',
-    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-    'payload': JSON.stringify({ tags: newTags }),
-    'muteHttpExceptions': true
-  };
-  UrlFetchApp.fetch(updateUrl, updateOptions);
-}
-
-function updateTicketAiDataRow(ticketId, updates) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Ticket_AI_Data');
-  if (!sheet) return;
-  var data = sheet.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(ticketId)) {
-      if (updates.proposed_subject !== undefined) sheet.getRange(i + 1, 6).setValue(updates.proposed_subject);
-      if (updates.integration !== undefined) sheet.getRange(i + 1, 9).setValue(updates.integration);
-      if (updates.product_area !== undefined) sheet.getRange(i + 1, 10).setValue(updates.product_area);
-      break;
-    }
-  }
-}
-
-function deleteTicketAiDataRow(ticketId) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Ticket_AI_Data');
-  if (!sheet) return;
-  var data = sheet.getDataRange().getValues();
-  // Bottom up to not shift indices
-  for (var i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][0]).trim() === String(ticketId)) {
-      sheet.deleteRow(i + 1);
-    }
-  }
-}
-
-function addTagToTicketAiDataRow(ticketId, tag) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Ticket_AI_Data');
-  if (!sheet) return;
-  var data = sheet.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === String(ticketId)) {
-      var existingTags = String(data[i][15] || ''); // index 15 is tags column
-      if (existingTags.indexOf(tag) === -1) {
-        var newTags = existingTags ? existingTags + ', ' + tag : tag;
-        sheet.getRange(i + 1, 16).setValue(newTags); // column 16 is index 15
-      }
-      break;
-    }
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────
 // FACTORY RESET: Clears all AI data sheets and removes AI tags/custom fields
 // from all tickets in Freshdesk (except ai:skipped).
@@ -2555,3 +2736,6 @@ function factoryResetAiData() {
   
   Logger.log("Reset " + ticketsReset + " tickets in Freshdesk.");
 }
+
+
+
