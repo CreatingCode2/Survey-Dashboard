@@ -2691,7 +2691,7 @@ function factoryResetAiData() {
   var ticketsReset = 0;
   
   while (true) {
-    var url = 'https://' + domain + '/api/v2/search/tickets?query="tag:\'ai:reviewed\' OR tag:\'ai:processed\'"&page=' + page;
+    var url = 'https://' + domain + '/api/v2/search/tickets?query=' + encodeURIComponent('"tag:\'ai:reviewed\' OR tag:\'ai:processed\'"') + '&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) break;
     
