@@ -529,23 +529,16 @@ This section is for Misty or whoever manages the backend Google Apps Script.
 4. Click **Deploy**
 5. Copy the new Web App URL if it changed and update `SHEET_URL` in `customer_health_dashboard.js`
 
-### Setting Up the Daily Maintenance Trigger
-1. In the Apps Script editor, select `setupDailyMaintenanceTrigger` from the function dropdown
-2. Click **Run**
-3. The trigger is now set — it will scan for newly closed tickets every night at 1 AM automatically
+### Adding a New User or Batch Admin
+You can now manage users and roles directly from the dashboard UI!
+1. Log in to the dashboard as an Admin.
+2. Click the **Manage Users** button.
+3. Add the user, give them the `admin` role, and click **Save Changes**.
 
-### Adding a New Batch Admin
-To allow another user to run batch jobs, open `Code.gs` and add their email to:
-```javascript
-var BATCH_ADMIN_EMAILS = [
-  'misty.wilmore@runnertechnologies.com',
-  'newadmin@runnertechnologies.com'  // add here
-];
-```
-Then redeploy.
+*(Fallback):* To hardcode a permanent admin, open `Config.gs` and add their email to `BATCH_ADMIN_EMAILS`, then redeploy.
 
 ### Adding New Excluded Ticket Types
-To prevent the AI from processing certain Freshdesk ticket types, open `Code.gs` and add to:
+To prevent the AI from processing certain Freshdesk ticket types, open `Config.gs` and add to:
 ```javascript
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal', 'YourNewType'];
 ```
@@ -553,52 +546,49 @@ Then redeploy.
 
 ---
 
-## 12. AI Development Rules (Read First — AI Agents Must Follow These)
+## 12. AI Development Rules (Read First - AI Agents Must Follow These)
 
 > These rules apply to any AI assistant (Antigravity, Gemini, Copilot, etc.) making changes to this project. They exist because a 6/23/2026 AI edit accidentally deleted a critical variable (`MAX_EXECUTION_TIME_MS`), causing 138 batch failures. These rules prevent that from happening again.
 
-### Rule 1 — Commit Every Code Change to Git Immediately
-- Every change to `Code.gs`, `customer_health_dashboard.js`, or `customer_health_dashboard.html` must be committed to git **before** moving on to the next task.
+### Rule 1 - Commit Every Code Change to Git Immediately
+- Every change to the Apps Script backend (`.gs` files) or frontend (`.js`, `.html`) must be committed to git **before** moving on to the next task.
 - Commit message must include `[AI]` prefix so changes are traceable: e.g. `[AI] fix(batch): restore MAX_EXECUTION_TIME_MS definition`
 - **Never** accumulate multiple AI edits without committing. One logical change = one commit.
 
-### Rule 2 — Never Touch Batch Logic Without a Diff First
-- Before modifying anything in `batchProcessTickets()`, `batchProcessTicketsTrigger()`, or `startBatchAiJob()`, run:
-  ```
-  git diff <last-working-commit> HEAD -- Code.gs
-  ```
+### Rule 2 - Never Touch Batch Logic Without a Diff First
+- Before modifying anything in `AiService.gs` regarding batch triggers, run a `git diff`.
 - Confirm `MAX_EXECUTION_TIME_MS` is still defined inside `batchProcessTickets()` after any edit.
 - Confirm `cleanupBatchTriggers()` still exists and is called from `batchProcessTickets()` on job completion.
 
-### Rule 3 — Do Not Break Working Functionality
+### Rule 3 - Do Not Break Working Functionality
 - Before fixing a bug, verify the fix does not remove or overwrite code that is currently working.
-- If a function is working correctly, do not rewrite it — make the minimum surgical change needed.
+- If a function is working correctly, do not rewrite it - make the minimum surgical change needed.
 - When in doubt, add to code rather than replace it.
 
-### Rule 4 — Use the Backup Branch for Risky Changes
+### Rule 4 - Use the Backup Branch for Risky Changes
 - The repo has a `backup/survey-dashboard-state` branch for rollback.
 - For any change that touches the GAS execution/trigger/timing logic, push current state to the backup branch first:
   ```
   git push origin master:backup/survey-dashboard-state --force
   ```
 
-### Rule 5 — Always Stay on `master`
+### Rule 5 - Always Stay on `master`
 - All work must be done on the `master` branch.
 - Push all changes to both `master` and `backup/survey-dashboard-state` at end of each session.
 
-### Rule 6 — Key Variables That Must Never Be Removed
+### Rule 6 - Key Variables That Must Never Be Removed
 The following variables/functions are critical to batch operation. Never delete them:
 | Variable / Function | File | Purpose |
 |---|---|---|
-| `MAX_EXECUTION_TIME_MS` | `Code.gs` ~line 1545 | GAS 6-min execution guard |
-| `batchProcessTicketsTrigger()` | `Code.gs` ~line 1440 | Time-based trigger entry point |
-| `cleanupBatchTriggers()` | `Code.gs` ~line 1682 | Removes orphaned triggers on job complete |
-| `BATCH_ADMIN_EMAILS` | `Code.gs` line 1 | Role-based access control for batch jobs |
-| `EXCLUDED_TICKET_TYPES` | `Code.gs` ~line 1525 | Noise filter for batch |
+| `MAX_EXECUTION_TIME_MS` | `AiService.gs` | GAS 6-min execution guard |
+| `batchProcessTicketsTrigger()` | `AiService.gs` | Time-based trigger entry point |
+| `cleanupBatchTriggers()` | `AiService.gs` | Removes orphaned triggers on job complete |
+| `BATCH_ADMIN_EMAILS` | `Config.gs` | Hardcoded fallback for admin access |
+| `EXCLUDED_TICKET_TYPES` | `Config.gs` | Noise filter for batch |
 
-### Rule 7 — After Any Deployment, Verify in Apps Script
-After copying `Code.gs` to the Apps Script editor:
-1. Check the Triggers panel for orphaned `batchProcessTicketsTrigger` time-based triggers and delete them
-2. Deploy a **New Version** — do not overwrite the same version number
+### Rule 7 - After Any Deployment, Verify in Apps Script
+After copying the `.gs` files to the Apps Script editor:
+1. Check the Triggers panel for orphaned time-based triggers and delete them
+2. Deploy a **New Version** - do not overwrite the same version number
 
-> ℹ️ **Re-authorization is NOT required after every deployment.** Google OAuth tokens persist across version deployments and stay valid for weeks to months. You only need to manually run a function in the editor if you see a `You do not have permission to call ScriptApp` error — this is rare and typically caused by a Google-forced token refresh after high API activity or a long period of inactivity. If it happens, run **`cleanupBatchTriggers`** in the Apps Script editor — it calls `ScriptApp` directly, which triggers the OAuth re-authorization prompt. Follow the Google consent dialog, then retry your batch — no redeployment needed.
+> ⚠️ **Re-authorization is NOT required after every deployment.** Google OAuth tokens persist across version deployments and stay valid for weeks to months. You only need to manually run a function in the editor if you see a `You do not have permission to call ScriptApp` error - this is rare and typically caused by a Google-forced token refresh after high API activity or a long period of inactivity. If it happens, run **`cleanupBatchTriggers`** in the Apps Script editor - it calls `ScriptApp` directly, which triggers the OAuth re-authorization prompt. Follow the Google consent dialog, then retry your batch - no redeployment needed.
