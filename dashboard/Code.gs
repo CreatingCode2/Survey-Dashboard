@@ -2475,3 +2475,83 @@ function addTagToTicketAiDataRow(ticketId, tag) {
     }
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// FACTORY RESET: Clears all AI data sheets and removes AI tags/custom fields
+// from all tickets in Freshdesk (except ai:skipped).
+// ─────────────────────────────────────────────────────────────────────────
+function factoryResetAiData() {
+  var props = PropertiesService.getScriptProperties();
+  var apiKey = props.getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  
+  // 1. Clear Google Sheets Data
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
+  if (aiSheet && aiSheet.getLastRow() > 1) {
+    aiSheet.getRange(2, 1, aiSheet.getLastRow() - 1, aiSheet.getLastColumn()).clearContent();
+  }
+  
+  var logSheet = ss.getSheetByName('AI_Processing_Log');
+  if (logSheet && logSheet.getLastRow() > 1) {
+    logSheet.getRange(2, 1, logSheet.getLastRow() - 1, logSheet.getLastColumn()).clearContent();
+  }
+  
+  var auditSheet = ss.getSheetByName('Audit_Report');
+  if (auditSheet && auditSheet.getLastRow() > 1) {
+    auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, auditSheet.getLastColumn()).clearContent();
+  }
+  
+  Logger.log("Sheets cleared.");
+
+  // 2. Clear Freshdesk Tickets
+  var page = 1;
+  var ticketsReset = 0;
+  
+  while (true) {
+    var url = 'https://' + domain + '/api/v2/search/tickets?query="tag:\'ai:reviewed\' OR tag:\'ai:processed\'"&page=' + page;
+    var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) break;
+    
+    var tktsRes = JSON.parse(res.getContentText());
+    var tkts = tktsRes.results || [];
+    if (tkts.length === 0) break;
+    
+    for (var i = 0; i < tkts.length; i++) {
+      var t = tkts[i];
+      var tags = t.tags || [];
+      var newTags = [];
+      
+      for (var j = 0; j < tags.length; j++) {
+        if (tags[j].indexOf('ai:') !== 0) {
+          newTags.push(tags[j]);
+        }
+      }
+      
+      var updatePayload = {
+        tags: newTags,
+        custom_fields: {
+          cf_ai_proposed_subject: null,
+          cf_ai_summary_notes: null,
+          cf_ai_product_area: null,
+          cf_ai_integration: null,
+          cf_ai_severity: null
+        }
+      };
+      
+      var updateUrl = 'https://' + domain + '/api/v2/tickets/' + t.id;
+      UrlFetchApp.fetch(updateUrl, {
+        'method': 'put',
+        'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+        'payload': JSON.stringify(updatePayload),
+        'muteHttpExceptions': true
+      });
+      ticketsReset++;
+    }
+    page++;
+    Utilities.sleep(1500); // Respect API rate limits
+  }
+  
+  Logger.log("Reset " + ticketsReset + " tickets in Freshdesk.");
+}
