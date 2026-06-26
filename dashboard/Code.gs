@@ -2691,12 +2691,12 @@ function factoryResetAiData() {
   var ticketsReset = 0;
   
   while (true) {
-    var url = 'https://' + domain + '/api/v2/search/tickets?query=' + encodeURIComponent('"tag:\'ai:reviewed\' OR tag:\'ai:processed\'"') + '&page=' + page;
+    var url = 'https://' + domain + '/api/v2/tickets?per_page=100&order_by=created_at&order_type=desc&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) break;
     
     var tktsRes = JSON.parse(res.getContentText());
-    var tkts = tktsRes.results || [];
+    var tkts = Array.isArray(tktsRes) ? tktsRes : (tktsRes.results || []);
     if (tkts.length === 0) break;
     
     for (var i = 0; i < tkts.length; i++) {
@@ -2705,7 +2705,7 @@ function factoryResetAiData() {
       var newTags = [];
       
       for (var j = 0; j < tags.length; j++) {
-        if (tags[j].indexOf('ai:') !== 0) {
+        if (tags[j].indexOf('ai:') !== 0 || tags[j] === 'ai:skipped' || tags[j] === 'ai:skipped-noise') {
           newTags.push(tags[j]);
         }
       }
