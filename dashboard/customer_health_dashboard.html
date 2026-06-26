@@ -554,7 +554,7 @@
                     </div>
                     <div class="chart-card relative">
                         <div class="flex items-center justify-between">
-                            <h2 class="text-lg font-semibold mb-1">ERP / Integrations</h2>
+                            <h2 class="text-lg font-semibold mb-1">Integrations \ ERP</h2>
                             <button id="ai-integration-back-btn" class="hidden text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center" onclick="window.renderIntegrationChart('top')">
                                 &larr; Back
                             </button>
@@ -565,7 +565,7 @@
                         </div>
                     </div>
                     <div class="chart-card">
-                        <h2 class="text-lg font-semibold mb-1">Services / Products</h2>
+                        <h2 class="text-lg font-semibold mb-1">Products \ Services</h2>
                         <p class="text-sm text-gray-500 mb-4">Add-ons like SFTP and Data Enhancement</p>
                         <div class="chart-container flex-grow" style="height: 300px;">
                             <canvas id="aiProductChart"></canvas>
@@ -666,6 +666,7 @@
                                     <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Severity</th>
                                     <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Resolution</th>
                                     <th scope="col" class="px-3 py-2 text-left text-xs font-medium text-amber-700 uppercase">Flag Reason</th>
+                                    <th scope="col" class="px-3 py-2 text-center text-xs font-medium text-amber-700 uppercase">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="ai-health-review-body" class="bg-white divide-y divide-gray-200">
@@ -967,9 +968,68 @@
                 <button onclick="closeAddContactModal()" class="px-4 py-2 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition text-sm">Cancel</button>
                 <button id="save-new-contact-btn" onclick="saveNewContact()" class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition text-sm">Save to Freshdesk</button>
             </div>
+    </div>
+
+    <!-- Modal for Manual Override -->
+    <div id="override-modal" class="modal fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 invisible opacity-0" aria-modal="true" role="dialog">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div class="p-6 border-b border-gray-200">
+                <h3 class="text-xl font-bold text-amber-700">🛠️ Manual AI Override</h3>
+                <p class="text-sm text-gray-500 mt-1">Bypass the AI and set the ticket classification manually.</p>
+                
+                <input type="hidden" id="override-ticket-id">
+                
+                <div class="mt-4">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Revised Subject Name</label>
+                    <input type="text" id="override-subject" class="w-full rounded border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-amber-500 focus:ring-amber-500">
+                </div>
+                
+                <div class="mt-4">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Integration / ERP</label>
+                    <select id="override-integration" class="w-full rounded border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-amber-500 focus:ring-amber-500">
+                        <option value="None">None</option>
+                        <option value="Banner - Self Service">Banner - Self Service</option>
+                        <option value="Banner - Admin">Banner - Admin</option>
+                        <option value="PeopleSoft - CS">PeopleSoft - CS</option>
+                        <option value="PeopleSoft - HCM">PeopleSoft - HCM</option>
+                        <option value="PeopleSoft - FIN">PeopleSoft - FIN</option>
+                        <option value="Colleague">Colleague</option>
+                        <option value="Advance">Advance</option>
+                        <option value="Oracle EBS">Oracle EBS</option>
+                        <option value="SurveyDIG">SurveyDIG</option>
+                        <option value="DES - NCOA">DES - NCOA</option>
+                        <option value="DES - Email Append">DES - Email Append</option>
+                        <option value="DES - Phone Append">DES - Phone Append</option>
+                        <option value="Unknown">Unknown</option>
+                    </select>
+                </div>
+
+                <div class="mt-4">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Product Area</label>
+                    <select id="override-product" class="w-full rounded border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-amber-500 focus:ring-amber-500">
+                        <option value="CLEAN_Address">CLEAN_Address</option>
+                        <option value="CLEAN_Cloud">CLEAN_Cloud</option>
+                        <option value="CLEAN_Data Portal">CLEAN_Data Portal</option>
+                        <option value="CLEAN_Entry">CLEAN_Entry</option>
+                        <option value="CLEAN_File">CLEAN_File</option>
+                        <option value="CLEAN_Update">CLEAN_Update</option>
+                        <option value="Data Enhancement Services">Data Enhancement Services</option>
+                        <option value="Documentation">Documentation</option>
+                        <option value="SurveyDIG">SurveyDIG</option>
+                        <option value="On boarding">On boarding</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                
+                <p id="override-status" class="text-xs font-medium mt-3 text-center"></p>
+            </div>
+            <div class="p-4 border-t border-gray-200 flex justify-end gap-3">
+                <button onclick="closeOverrideModal()" class="px-4 py-2 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200 transition text-sm">Cancel</button>
+                <button id="save-override-btn" onclick="saveManualOverride()" class="px-4 py-2 bg-amber-600 text-white font-semibold rounded-lg hover:bg-amber-700 transition text-sm shadow-sm">Save Classification</button>
+            </div>
         </div>
     </div>
 
-    <script src="customer_health_dashboard.js?v=19"></script>
+    <script src="customer_health_dashboard.js"></script>
 </body>
 </html>

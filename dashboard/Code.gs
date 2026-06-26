@@ -322,6 +322,80 @@ function doPost(e) {
       return jsonResponse('success', 'Queued ' + retryCount + ' failed ticket(s) for reprocessing.');
     }
 
+    // ── AI Queue Action Handlers ─────────────────────────────
+    if (action === 'override_ai_classification') {
+      var overrideCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(overrideCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      var newSubject = postData.newSubject;
+      var newIntegration = postData.newIntegration;
+      var newProduct = postData.newProduct;
+      
+      var customFields = {
+        cf_ai_proposed_subject: newSubject,
+        cf_ai_integration: newIntegration,
+        cf_ai_product_area: newProduct
+      };
+      
+      var res = updateFreshdeskTicketFields(ticketId, customFields);
+      if (res && res.status === 'success') {
+        updateTicketAiDataRow(ticketId, {
+          proposed_subject: newSubject,
+          integration: newIntegration,
+          product_area: newProduct
+        });
+        return jsonResponse('success', 'Override saved.');
+      }
+      return jsonResponse('error', 'Failed to update Freshdesk: ' + (res ? res.message : 'Unknown error'));
+    }
+
+    if (action === 'skip_ai_ticket') {
+      var skipCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(skipCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      var res = updateFreshdeskTicketTags(ticketId, ['ai:skipped']);
+      if (res && res.status === 'success') {
+        deleteTicketAiDataRow(ticketId);
+        logAiProcessing(ticketId, 'skipped', 'Skipped via UI review', false, null);
+        return jsonResponse('success', 'Ticket skipped.');
+      }
+      return jsonResponse('error', 'Failed to add tag to Freshdesk.');
+    }
+
+    if (action === 'dismiss_ai_ticket') {
+      var dismissCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(dismissCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      var res = updateFreshdeskTicketTags(ticketId, ['ai:reviewed']);
+      if (res && res.status === 'success') {
+        addTagToTicketAiDataRow(ticketId, 'ai:reviewed');
+        return jsonResponse('success', 'Ticket dismissed from queue.');
+      }
+      return jsonResponse('error', 'Failed to add tag to Freshdesk.');
+    }
+
+    if (action === 'reprocess_ai_ticket') {
+      var reprocessCallerEmail = postData.triggeredByEmail || '';
+      if (!isBatchAdmin(reprocessCallerEmail)) return jsonResponse('error', 'Access denied.');
+      
+      var ticketId = postData.ticketId;
+      
+      var customFields = { cf_ai_proposed_subject: null, cf_ai_summary_notes: null, cf_ai_product_area: null, cf_ai_integration: null, cf_ai_severity: null };
+      updateFreshdeskTicketFields(ticketId, customFields);
+      removeFreshdeskAiTags(ticketId);
+      deleteTicketAiDataRow(ticketId);
+      
+      var props = PropertiesService.getScriptProperties();
+      props.setProperty('AI_Batch_TriggeredBy', postData.triggeredBy || 'Unknown');
+      props.setProperty('AI_Batch_TriggeredByEmail', reprocessCallerEmail);
+      var result = processTicketById(ticketId, false, true);
+      
+      return jsonResponse(result.status, 'Reprocessed ticket.');
+    }
+
     // ----------------------------------------------------------------
     // ACTION: get_outreach_contacts
     // ----------------------------------------------------------------
@@ -1186,9 +1260,9 @@ function processTicket(ticketId, dryRun) {
     "Please provide a JSON response with the following keys:\n" +
     "- summary: A detailed summary of the problem, steps taken, and resolution. Paragraph format. Use the Agent Fields provided to contextualize your summary.\n" +
     "- proposed_subject: A revised subject line. You MUST include the brackets. If integration is 'None' or 'Unknown', format strictly as '[{Product Area}]: {Issue Type} - {Short Description}'. Otherwise, format strictly as '[{Product Area} - {Integration}]: {Issue Type} - {Short Description}'. (Max 80 chars)\n" +
-    "- issue_type: A specific issue category. Use one of: Configuration Issue, Integration Failure, Batch Processing Issue, Installation, Data File Update, SFTP Access Issue, Service Interruption, How-To, Account Management, Feature Request, Notification, Other.\n" +
+    "- issue_type: A short, specific 2-4 word phrase describing the exact type of issue (e.g., NCOA File Upload, Database Migration, Login Failure, SFTP Access). Be descriptive and specific so we can accurately analyze issue trends later. Do not restrict yourself to a predefined list.\n" +
     "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'.\n" +
-    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]' (e.g. 'DES - Email Append'). If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces (e.g., explicitly look for 'HCM', 'FIN', 'Finance', 'CS', 'Campus Solutions', 'Admin', 'Self Service', 'Classic', 'Fluid', 'EDI'). Format exactly as '[Base ERP] - [Module]' (e.g. 'PeopleSoft - HCM', 'PeopleSoft - FIN', 'PeopleSoft - CS', or 'Banner - Self Service'). If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
+    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]'. If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces. Explicitly look for 'HCM', 'FIN', 'Finance', 'cs', 'Campus Solutions' (map to PeopleSoft - CS), 'Admin', 'ss', 'ssb', 'ss 9.x', 'self service' (map to Banner - Self Service), 'Classic', 'Fluid', 'EDI'. Format exactly as '[Base ERP] - [Module]'. If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, SurveyDIG, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
     "- platform: MUST be the exact Agent-Assigned Platform if provided. Otherwise: Cloud, Windows, Linux, or Other.\n" +
     "- severity: critical, high, medium, or low.\n" +
     "- resolution: solution-provided, fixed-bug, user-error, workaround-provided, escalated, or pending.\n" +
@@ -1677,8 +1751,43 @@ function getBatchAiStatus() {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
+var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847];
 
+var NOISE_SUBJECT_PHRASES = [
+  'out of office',
+  'automatic reply',
+  'auto-reply',
+  'vacation',
+  'autoreply',
+  'oracle: security notification',
+  'uptime robot',
+  'zoom',
+  'tempo',
+  'basecamp',
+  'rejected posting to infdba',
+  'runner edq: holiday reminder',
+  'your service request has been received and will be assigned',
+  'confluence',
+  'recall:',
+  'passcode',
+  'new voicemail',
+  'unused transaction pool expires',
+  'melissa product news',
+  'melissa data subscription update',
+  'file is complete and updated',
+  'completed file posted on ftp',
+  'transactions low'
+];
 
+function isNoiseSubject(subject) {
+  if (!subject) return false;
+  var s = subject.toLowerCase();
+  for (var i = 0; i < NOISE_SUBJECT_PHRASES.length; i++) {
+    if (s.indexOf(NOISE_SUBJECT_PHRASES[i]) !== -1) return true;
+  }
+  if (s.indexOf('runner edq') !== -1 && s.indexOf('celebration') !== -1) return true;
+  return false;
+}
 
 function batchProcessTickets(dryRun) {
   var props = PropertiesService.getScriptProperties();
@@ -1772,60 +1881,52 @@ function batchProcessTickets(dryRun) {
         continue;
       }
       
-      // 1. Skip excluded ticket types (Spam, Runner Internal - they are noise)
-      if (EXCLUDED_TICKET_TYPES.indexOf(ticketType) !== -1) {
-        skippedCount++;
-        continue;
-      }
-      
       var subject      = tkts[i].subject ? tkts[i].subject.toLowerCase() : '';
       var tags         = tkts[i].tags || [];
       var customFields = tkts[i].custom_fields || {};
       
-      // 2. Skip Auto-Replies, internal notifications, and known noise
-      if (subject.indexOf('out of office') !== -1 ||
-          subject.indexOf('automatic reply') !== -1 ||
-          subject.indexOf('auto-reply') !== -1 ||
-          subject.indexOf('vacation') !== -1 ||
-          subject.indexOf('autoreply') !== -1 ||
-          subject.indexOf('oracle: security notification') !== -1 ||
-          subject.indexOf('uptime robot') !== -1 ||
-          subject.indexOf('zoom') !== -1 ||
-          subject.indexOf('tempo') !== -1 ||
-          subject.indexOf('basecamp') !== -1 ||
-          subject.indexOf('rejected posting to infdba') !== -1 ||
-          subject.indexOf('runner edq: holiday reminder') !== -1 ||
-          (subject.indexOf('runner edq') !== -1 && subject.indexOf('celebration') !== -1) ||
-          subject.indexOf('your service request has been received and will be assigned') !== -1 ||
-          subject.indexOf('confluence') !== -1 ||
-          subject.indexOf('recall:') !== -1 ||
-          subject.indexOf('passcode') !== -1 ||
-          subject.indexOf('new voicemail') !== -1 ||
-          subject.indexOf('unused transaction pool expires') !== -1 ||
-          subject.indexOf('melissa product news') !== -1 ||
-          subject.indexOf('melissa data subscription update') !== -1 ||
-          subject.indexOf('file is complete and updated') !== -1 ||
-          subject.indexOf('completed file posted on ftp') !== -1 ||
-          subject.indexOf('transactions low') !== -1) {
-        skippedCount++;
-        continue;
-      }
-      
-      var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847];
-      if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
-        skippedCount++;
-        continue;
-      }
-      
-      // 3. Skip Already Processed Tickets (saves API credits)
+      // 1. Skip Already Processed Tickets (saves API credits)
       var alreadyProcessed = false;
+      var isManuallySkipped = false;
       if (customFields.cf_ai_summary_notes) alreadyProcessed = true;
       for (var t = 0; t < tags.length; t++) {
         if (tags[t].toLowerCase().indexOf('ai:') === 0) alreadyProcessed = true;
+        if (tags[t].toLowerCase() === 'ai:skipped' || tags[t].toLowerCase() === 'ai:skipped-noise') isManuallySkipped = true;
       }
-      if (alreadyProcessed) {
+      
+      if (isManuallySkipped) {
         skippedCount++;
         continue;
+      }
+      
+      // 2. Skip excluded ticket types (Spam, Runner Internal - they are noise)
+      if (EXCLUDED_TICKET_TYPES.indexOf(ticketType) !== -1) {
+        skippedCount++;
+        if (!alreadyProcessed) logAiProcessing(ticketId, 'skipped', 'Skipped: Excluded Ticket Type', dryRun, null);
+        continue;
+      }
+      
+      // 3. Skip Auto-Replies, internal notifications, and known noise
+      if (isNoiseSubject(subject)) {
+        skippedCount++;
+        if (!alreadyProcessed) logAiProcessing(ticketId, 'skipped', 'Skipped: Noise Subject Filter', dryRun, null);
+        continue;
+      }
+      
+      // 4. Skip Hardcoded ignores
+      if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
+        skippedCount++;
+        if (!alreadyProcessed) logAiProcessing(ticketId, 'skipped', 'Skipped: Hardcoded Ignore List', dryRun, null);
+        continue;
+      }
+
+      if (alreadyProcessed) {
+        // We log alreadyProcessed tickets ONLY if overwrite is not requested (but wait, overwrite isn't implemented here yet!)
+        var overwrite = props.getProperty('AI_Batch_Overwrite') === 'true';
+        if (!overwrite) {
+          skippedCount++;
+          continue;
+        }
       }
       
       // 4. Process the ticket
@@ -2049,6 +2150,8 @@ function runBatchAudit(daysBack, startDateStr, endDateStr) {
       
       if (t.status !== 4 && t.status !== 5) { cat = 'OPEN/PENDING'; stats.openPending++; }
       else if (EXCLUDED_TICKET_TYPES.indexOf(t.type || '') !== -1) { cat = 'EXCLUDED TYPE'; stats.excludedType++; }
+      else if (isNoiseSubject(t.subject)) { cat = 'NOISE FILTER'; stats.noise++; }
+      else if (HARDCODED_IGNORED_TICKETS.indexOf(Number(t.id)) !== -1) { cat = 'HARDCODED IGNORE'; stats.noise++; }
       else if (processedIds[String(t.id)]) { cat = 'ALREADY PROCESSED'; stats.alreadyProcessed++; }
       else { stats.eligible++; }
       
@@ -2253,4 +2356,122 @@ function revertNoiseTickets() {
   }
   
   console.log("Cleanup Results:\n" + logMessages.join('\n'));
+}
+
+// ── UI Queue Helper Functions ─────────────────────────────────────────────
+function updateFreshdeskTicketFields(ticketId, customFields) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  
+  var payload = { custom_fields: customFields };
+  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
+  var updateOptions = {
+    'method': 'put',
+    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    'payload': JSON.stringify(payload),
+    'muteHttpExceptions': true
+  };
+  
+  var updateRes = UrlFetchApp.fetch(updateUrl, updateOptions);
+  if (updateRes.getResponseCode() === 200) return { status: 'success' };
+  return { status: 'error', message: updateRes.getContentText() };
+}
+
+function updateFreshdeskTicketTags(ticketId, tagsToAdd) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
+  
+  // Get current tags
+  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, fdOpts);
+  if (res.getResponseCode() !== 200) return { status: 'error' };
+  var ticket = JSON.parse(res.getContentText());
+  var tags = ticket.tags || [];
+  
+  tagsToAdd.forEach(function(t) {
+    if (tags.indexOf(t) === -1) tags.push(t);
+  });
+  
+  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
+  var updateOptions = {
+    'method': 'put',
+    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    'payload': JSON.stringify({ tags: tags }),
+    'muteHttpExceptions': true
+  };
+  var updateRes = UrlFetchApp.fetch(updateUrl, updateOptions);
+  if (updateRes.getResponseCode() === 200) return { status: 'success' };
+  return { status: 'error', message: updateRes.getContentText() };
+}
+
+function removeFreshdeskAiTags(ticketId) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('Freshdesk_Api_Key');
+  var domain = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
+  
+  var res = UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + ticketId, fdOpts);
+  if (res.getResponseCode() !== 200) return;
+  var ticket = JSON.parse(res.getContentText());
+  var tags = ticket.tags || [];
+  var newTags = [];
+  for (var i = 0; i < tags.length; i++) {
+    if (tags[i].indexOf('ai:') !== 0) newTags.push(tags[i]);
+  }
+  
+  var updateUrl = 'https://' + domain + '/api/v2/tickets/' + ticketId;
+  var updateOptions = {
+    'method': 'put',
+    'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+    'payload': JSON.stringify({ tags: newTags }),
+    'muteHttpExceptions': true
+  };
+  UrlFetchApp.fetch(updateUrl, updateOptions);
+}
+
+function updateTicketAiDataRow(ticketId, updates) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Ticket_AI_Data');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(ticketId)) {
+      if (updates.proposed_subject !== undefined) sheet.getRange(i + 1, 6).setValue(updates.proposed_subject);
+      if (updates.integration !== undefined) sheet.getRange(i + 1, 9).setValue(updates.integration);
+      if (updates.product_area !== undefined) sheet.getRange(i + 1, 10).setValue(updates.product_area);
+      break;
+    }
+  }
+}
+
+function deleteTicketAiDataRow(ticketId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Ticket_AI_Data');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  // Bottom up to not shift indices
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]).trim() === String(ticketId)) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
+
+function addTagToTicketAiDataRow(ticketId, tag) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Ticket_AI_Data');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(ticketId)) {
+      var existingTags = String(data[i][15] || ''); // index 15 is tags column
+      if (existingTags.indexOf(tag) === -1) {
+        var newTags = existingTags ? existingTags + ', ' + tag : tag;
+        sheet.getRange(i + 1, 16).setValue(newTags); // column 16 is index 15
+      }
+      break;
+    }
+  }
 }

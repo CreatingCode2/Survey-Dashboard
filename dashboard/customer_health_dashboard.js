@@ -3173,6 +3173,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const issueType  = (r.issue_type  || '').toLowerCase().trim();
             const severity   = (r.severity    || '').toLowerCase().trim();
             const resolution = (r.resolution  || '').toLowerCase().trim();
+            const tags       = (r.tags        || '').toLowerCase();
+            
+            if (tags.includes('ai:reviewed')) return false; // hide dismissed tickets
+            
             return issueType === 'other' || severity === 'critical' || resolution === 'pending';
         });
 
@@ -3195,7 +3199,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     let sevColor = severity === 'critical' ? 'text-red-700 font-bold' : 'text-gray-700';
 
                     container.innerHTML += `
-                <tr class="hover:bg-amber-50 cursor-pointer" onclick="window.open('${fdUrl}','_blank')">
+                <tr class="hover:bg-amber-50">
                     <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
                         <a href="${fdUrl}" target="_blank" class="hover:underline">#${r.ticket_id}</a>
                     </td>
@@ -3204,6 +3208,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="px-3 py-2 whitespace-nowrap text-sm ${sevColor}">${severity}</td>
                     <td class="px-3 py-2 whitespace-nowrap text-sm">${resolution}</td>
                     <td class="px-3 py-2 text-xs text-amber-700 font-medium">${flags.join(', ')}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-center">
+                        <button onclick="openOverrideModal(${r.ticket_id}, \`${(r.proposed_subject || '').replace(/`/g, '')}\`, '${r.integration || 'None'}', '${r.product_area || 'Other'}')" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Manually edit subject, integration, and product area">Edit</button>
+                        <button onclick="dismissAiTicket(${r.ticket_id})" class="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs font-semibold mr-1" title="Accept this classification and clear it from the queue (keeps it in your charts)">Dismiss</button>
+                        <button onclick="skipAiTicket(${r.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold mr-1" title="Remove from charts and mark as noise forever">Noise</button>
+                        <button onclick="reprocessAiTicket(${r.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold" title="Re-run AI classification on this ticket">Re-run</button>
+                    </td>
                 </tr>
             `;
         });
@@ -3421,6 +3431,164 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(res => res.json())
         .then(data => { alert(data.message || 'Retry job started.'); pollAiBatchStatus(); })
         .catch(err => { alert('Error: ' + err.message); });
+    };
+
+    // ── AI Queue Action Handlers ─────────────────────────────────────────────
+    window.openOverrideModal = function(ticketId, currentSubject, currentIntegration, currentProduct) {
+        document.getElementById('override-ticket-id').value = ticketId;
+        document.getElementById('override-subject').value = currentSubject;
+        
+        // Set dropdown values if they exist, otherwise fallback
+        const intSelect = document.getElementById('override-integration');
+        if (Array.from(intSelect.options).some(o => o.value === currentIntegration)) {
+            intSelect.value = currentIntegration;
+        } else {
+            intSelect.value = 'Unknown';
+        }
+
+        const prodSelect = document.getElementById('override-product');
+        if (Array.from(prodSelect.options).some(o => o.value === currentProduct)) {
+            prodSelect.value = currentProduct;
+        } else {
+            prodSelect.value = 'Other';
+        }
+
+        document.getElementById('override-status').textContent = '';
+        
+        const modal = document.getElementById('override-modal');
+        modal.classList.remove('invisible', 'opacity-0');
+        modal.classList.add('opacity-100');
+    };
+
+    window.closeOverrideModal = function() {
+        const modal = document.getElementById('override-modal');
+        modal.classList.remove('opacity-100');
+        modal.classList.add('opacity-0');
+        setTimeout(() => modal.classList.add('invisible'), 300);
+    };
+
+    window.saveManualOverride = function() {
+        if (!isLoggedIn) { alert('You must be logged in.'); return; }
+        const ticketId = document.getElementById('override-ticket-id').value;
+        const newSubject = document.getElementById('override-subject').value;
+        const newIntegration = document.getElementById('override-integration').value;
+        const newProduct = document.getElementById('override-product').value;
+        
+        const statusEl = document.getElementById('override-status');
+        const btn = document.getElementById('save-override-btn');
+        statusEl.className = 'text-xs font-medium mt-3 text-center text-amber-600';
+        statusEl.textContent = 'Saving override...';
+        btn.disabled = true;
+
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'override_ai_classification',
+                ticketId: ticketId,
+                newSubject: newSubject,
+                newIntegration: newIntegration,
+                newProduct: newProduct,
+                triggeredBy: currentUser.name,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.disabled = false;
+            if (data.status === 'success') {
+                statusEl.className = 'text-xs font-medium mt-3 text-center text-green-600';
+                statusEl.textContent = '✅ Saved! Chart data updated.';
+                setTimeout(() => {
+                    closeOverrideModal();
+                    window.fetchAiData(); // refresh table and charts
+                }, 1500);
+            } else {
+                statusEl.className = 'text-xs font-medium mt-3 text-center text-red-600';
+                statusEl.textContent = '❌ Error: ' + data.message;
+            }
+        })
+        .catch(err => {
+            btn.disabled = false;
+            statusEl.className = 'text-xs font-medium mt-3 text-center text-red-600';
+            statusEl.textContent = '❌ Error: ' + err.message;
+        });
+    };
+
+    window.skipAiTicket = function(ticketId) {
+        if (!isLoggedIn) { alert('You must be logged in.'); return; }
+        if (!confirm(`Are you sure you want to completely skip ticket #${ticketId}? It will be removed from the AI charts.`)) return;
+        
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'skip_ai_ticket',
+                ticketId: ticketId,
+                triggeredBy: currentUser.name,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.fetchAiData(); // refresh table
+            } else {
+                alert('Error skipping ticket: ' + data.message);
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
+    };
+
+    window.dismissAiTicket = function(ticketId) {
+        if (!isLoggedIn) { alert('You must be logged in.'); return; }
+        
+        // Optimistically hide the row for instant feedback
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'dismiss_ai_ticket',
+                ticketId: ticketId,
+                triggeredBy: currentUser.name,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.fetchAiData(); // refresh table
+            } else {
+                alert('Error dismissing ticket: ' + data.message);
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
+    };
+
+    window.reprocessAiTicket = function(ticketId) {
+        if (!isLoggedIn) { alert('You must be logged in.'); return; }
+        if (!confirm(`Are you sure you want to clear the AI data and re-run classification for ticket #${ticketId}?`)) return;
+        
+        // Show loading state directly in the row if possible, or just wait for fetchAiData to refresh.
+        // It's easier to just call the API and refresh.
+        alert(`Reprocessing #${ticketId}. The system will now clear data and run the AI again. This takes ~15 seconds.`);
+        
+        fetch(SHEET_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'reprocess_ai_ticket',
+                ticketId: ticketId,
+                triggeredBy: currentUser.name,
+                triggeredByEmail: currentUser.email
+            })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(`✅ Ticket #${ticketId} reprocessed successfully.`);
+                window.fetchAiData(); // refresh table
+            } else {
+                alert('Error reprocessing ticket: ' + data.message);
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
     };
 
 }); // END DOMContentLoaded
