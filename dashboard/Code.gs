@@ -2118,7 +2118,8 @@ function doPost(e) {
         var ss = SpreadsheetApp.getActiveSpreadsheet();
         var sheet = ss.getSheetByName('User_Permissions');
         if (!sheet) {
-          return jsonResponse('error', 'User_Permissions sheet not found.');
+          sheet = ss.insertSheet('User_Permissions');
+          sheet.appendRow(['Name', 'Email', 'Role', 'Can_Access_Data_Table', 'Can_Access_Ticket_Intel']);
         }
         
         // Clear all rows except header
