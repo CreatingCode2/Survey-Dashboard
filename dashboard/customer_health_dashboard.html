@@ -498,6 +498,15 @@
                 </div>
 
                 <!-- ── Enhanced status bar ─────────────────────────────────── -->
+                <div id="ai-batch-exhausted-warning" class="hidden bg-amber-50 border-l-4 border-amber-500 p-4 mb-4 rounded-r-lg shadow-sm">
+                    <div class="flex items-center">
+                        <span class="text-amber-500 text-xl mr-3">⚠️</span>
+                        <div>
+                            <h3 class="text-sm font-bold text-amber-800">No More Tickets Available</h3>
+                            <p class="text-sm text-amber-700" id="ai-batch-exhausted-text">The AI has processed all eligible tickets within the specified timeframe.</p>
+                        </div>
+                    </div>
+                </div>
                 <div id="ai-status-container" class="hidden bg-white rounded-lg border border-indigo-200 p-4 mb-4 shadow-sm">
                     <div class="flex flex-wrap justify-between items-center text-sm mb-2 gap-2">
                         <span class="font-semibold text-indigo-800" id="ai-status-text">Batch job running...</span>

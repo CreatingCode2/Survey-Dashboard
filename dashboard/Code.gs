@@ -126,7 +126,10 @@ function isNoiseBody(threadText) {
   var noisePhrases = [
     'this message is to confirm that we have received your it request',
     'we would like to acknowledge that we have received your request and a ticket has been created',
-    'your service request has been received and will be assigned'
+    'your service request has been received and will be assigned',
+    'this is an acknowledgement mail for your request',
+    'it requests your assistance to help improve our service to you! we value your feedback and look forward to hearing from you.',
+    'a full walk-out strike has been called by the ontario public service employees union (opseu),'
   ];
   for (var i = 0; i < noisePhrases.length; i++) {
     if (b.indexOf(noisePhrases[i]) !== -1) return true;
@@ -794,7 +797,15 @@ function processTicket(ticketId, dryRun) {
     'daas_alerts@informatica.com',             // Informatica automated alerts
     'info@ellucian.com',                       // Known noise sender
     'contactcloud@google.com',                 // Known noise sender
-    'partnerships@ellucian.com'                // Known noise sender
+    'partnerships@ellucian.com',               // Known noise sender
+    'no-reply@sns.amazonaws.com',
+    'support@rtsdba.freshdesk.com',
+    'microsoft-noreply@microsoft.com',
+    'noreply@news.hornetsecurity.com',
+    'partnernews@partner.hornetsecurity.com',
+    'm365copilotupdates@microsoft.com',
+    'notify@teamdynamixapp.com',
+    'no-reply@notify.microsoft.com'
   ];
   var EXCLUDED_SENDER_DOMAINS = [
     'melissa.com', 'melissadata.com',          // Melissa file notifications
@@ -856,7 +867,7 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 6. Hardcoded Tickets to Ignore and specific subject phrases
-  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761];
+  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395];
   if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
     isNoiseTicket = true;
   }
@@ -915,8 +926,8 @@ function processTicket(ticketId, dryRun) {
     "Please provide a JSON response with the following keys:\n" +
     "- summary: A detailed summary of the problem, steps taken, and resolution. Paragraph format. Use the Agent Fields provided to contextualize your summary.\n" +
     "- proposed_subject: A revised subject line. You MUST include the brackets. If integration is 'None' or 'Unknown', format strictly as '[{Product Area}]: {Issue Type} - {Short Description}'. Otherwise, format strictly as '[{Product Area} - {Integration}]: {Issue Type} - {Short Description}'. (Max 80 chars)\n" +
-    "- issue_type: A short, specific 2-4 word phrase describing the exact type of issue (e.g., NCOA File Upload, Database Migration, Login Failure, SFTP Access). Be descriptive and specific so we can accurately analyze issue trends later. If it's a failed unattended update, classify as 'System Error'. Do not restrict yourself to a predefined list.\n" +
-    "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, Geo Products Usage Reporting, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'. Tickets reporting geocoder usage, geopoints, or Geodata should be categorized as 'Geo Products Usage Reporting'.\n" +
+    "- issue_type: A short, specific 2-4 word phrase describing the exact type of issue (e.g., NCOA File Upload, Database Migration, Login Failure, SFTP Access). Be descriptive and specific so we can accurately analyze issue trends later. IMPORTANT: Tickets reporting geocoder usage, geopoints, or Geodata should be explicitly categorized as 'Geo Products Usage Reporting'. Otherwise, do not restrict yourself to a predefined list.\n" +
+    "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'.\n" +
     "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]'. If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces. Explicitly look for 'HCM', 'FIN', 'Finance', 'cs', 'Campus Solutions' (map to PeopleSoft - CS), 'Admin', 'ss', 'ssb', 'ss 9.x', 'self service' (map to Banner - Self Service), 'Classic', 'Fluid', 'EDI'. Format exactly as '[Base ERP] - [Module]'. If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, SurveyDIG, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
     "- platform: MUST be the exact Agent-Assigned Platform if provided. Otherwise: Cloud, Windows, Linux, or Other.\n" +
     "- severity: critical, high, medium, or low.\n" +
@@ -1123,6 +1134,7 @@ function startBatchAiJob(dryRun, overwrite, triggeredBy, triggeredByEmail, limit
   props.setProperty('AI_Batch_TriggeredByEmail', triggeredByEmail || '');
   props.setProperty('AI_Batch_StartTime', new Date().toISOString()); // NEW
   props.setProperty('AI_Batch_LastRunEnd', '');    // Clear previous end time
+  props.setProperty('AI_Batch_FinishedStatus', '');
 
   // Try processing immediately
   batchProcessTickets(dryRun);
@@ -1163,6 +1175,8 @@ function getBatchAiStatus() {
     ticketsProcessed: parseInt(props.getProperty('AI_Batch_Count') || '0', 10),
     failedCount:      parseInt(props.getProperty('AI_Batch_FailCount') || '0', 10),
     skippedCount:     parseInt(props.getProperty('AI_Batch_SkipCount') || '0', 10),
+    limit:            parseInt(props.getProperty('AI_Batch_Limit') || '0', 10),
+    finishedStatus:   props.getProperty('AI_Batch_FinishedStatus') || '',
     startTime:        props.getProperty('AI_Batch_StartTime') || '',
     lastRunEnd:       props.getProperty('AI_Batch_LastRunEnd') || '',
     triggeredBy:      props.getProperty('AI_Batch_TriggeredBy') || '',
@@ -1386,6 +1400,13 @@ function batchProcessTickets(dryRun) {
 
   // Send completion email and clean up triggers only when the job truly finishes
   if (jobFullyComplete) {
+    if (limit > 0 && processedCount < limit) {
+      props.setProperty('AI_Batch_FinishedStatus', 'exhausted');
+    } else if (limit > 0 && processedCount >= limit) {
+      props.setProperty('AI_Batch_FinishedStatus', 'limit_reached');
+    } else {
+      props.setProperty('AI_Batch_FinishedStatus', 'exhausted');
+    }
     cleanupBatchTriggers();
     sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dryRun);
   }
@@ -1582,8 +1603,10 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
     var props         = PropertiesService.getScriptProperties();
     var triggeredBy   = props.getProperty('AI_Batch_TriggeredBy')      || 'System';
     var toEmail       = props.getProperty('AI_Batch_TriggeredByEmail') || '';
-    var startTime     = props.getProperty('AI_Batch_StartTime')         || '';
+    var startTime     = props.getProperty('AI_Batch_StartTime')        || '';
     var endTime       = new Date().toISOString();
+    var limit         = parseInt(props.getProperty('AI_Batch_Limit') || '0', 10);
+    var finishedStatus= props.getProperty('AI_Batch_FinishedStatus') || '';
 
     // Always notify Misty; also notify the triggering user if different
     var recipients = ['misty.wilmore@runnertechnologies.com'];
@@ -1608,6 +1631,12 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
                  + '   Use the "Retry Failed Tickets" button in the dashboard to re-process them.\n';
     }
 
+    var outOfTicketsNote = '';
+    if (limit > 0 && finishedStatus === 'exhausted' && processedCount < limit) {
+      outOfTicketsNote = '\n⚠️  OUT OF TICKETS: Requested ' + limit + ' tickets, but only ' + processedCount + ' were available to process in the specified timeframe.\n'
+                       + '   There are no more tickets left to process in this timeframe.\n';
+    }
+
     var body = 'Ticket Intelligence Batch Job Summary\n'
              + '=====================================\n'
              + 'Mode:       ' + modeLabel + '\n'
@@ -1622,6 +1651,7 @@ function sendBatchCompletionEmail(processedCount, failedCount, skippedCount, dry
              + '    (Spam/Runner Internal), noise filters (Basecamp, Confluence, OOO, etc.),\n'
              + '    or hardcoded excluded ticket numbers)\n'
              + partialNote
+             + outOfTicketsNote
              + '\n---\nView the full log in the Ticket Intelligence tab of the Customer Health Dashboard.\n'
              + 'https://support.runnertech.com';
 

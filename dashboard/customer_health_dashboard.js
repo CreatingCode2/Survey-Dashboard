@@ -1719,7 +1719,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             customRangeWrapper.classList.add('hidden');
             updateDashboard();
+            if (typeof window.filterAiDataAndRender === 'function') window.filterAiDataAndRender();
         }
+    });
+
+    document.getElementById('startDate').addEventListener('change', () => {
+        updateDashboard();
+        if (typeof window.filterAiDataAndRender === 'function') window.filterAiDataAndRender();
+    });
+
+    document.getElementById('endDate').addEventListener('change', () => {
+        updateDashboard();
+        if (typeof window.filterAiDataAndRender === 'function') window.filterAiDataAndRender();
     });
 
     const dateFormatEl = document.getElementById('dateFormatFilter');
@@ -1753,9 +1764,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (state.date !== 'all') {
-            const days = parseInt(state.date, 10);
-            const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-            filtered = filtered.filter(d => new Date(d.date) >= cutoff);
+            if (state.date === 'custom') {
+                const startStr = document.getElementById('startDate').value;
+                const endStr = document.getElementById('endDate').value;
+                if (startStr) {
+                    const startDt = new Date(startStr);
+                    startDt.setHours(0,0,0,0);
+                    filtered = filtered.filter(d => new Date(d.date) >= startDt);
+                }
+                if (endStr) {
+                    const endDt = new Date(endStr);
+                    endDt.setHours(23,59,59,999);
+                    filtered = filtered.filter(d => new Date(d.date) <= endDt);
+                }
+            } else {
+                const days = parseInt(state.date, 10);
+                const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+                filtered = filtered.filter(d => new Date(d.date) >= cutoff);
+            }
         }
 
         if (drillDownState.active && currentView === 'data') {
@@ -2985,9 +3011,35 @@ document.addEventListener('DOMContentLoaded', () => {
                         tags:             p[15]
                     });
                 }
-                window.renderAiCharts(trendData, null);
-                window.renderTicketBrowser(trendData);
-                window.renderAiReviewQueue(trendData);
+                window.allAiTicketsData = trendData;
+                window.filterAiDataAndRender = function() {
+                    let filteredAi = [...window.allAiTicketsData];
+                    const dateVal = document.getElementById('dateFilter').value;
+                    if (dateVal !== 'all') {
+                        if (dateVal === 'custom') {
+                            const startStr = document.getElementById('startDate').value;
+                            const endStr = document.getElementById('endDate').value;
+                            if (startStr) {
+                                const startDt = new Date(startStr);
+                                startDt.setHours(0,0,0,0);
+                                filteredAi = filteredAi.filter(d => new Date(d.date) >= startDt);
+                            }
+                            if (endStr) {
+                                const endDt = new Date(endStr);
+                                endDt.setHours(23,59,59,999);
+                                filteredAi = filteredAi.filter(d => new Date(d.date) <= endDt);
+                            }
+                        } else {
+                            const days = parseInt(dateVal, 10);
+                            const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+                            filteredAi = filteredAi.filter(d => new Date(d.date) >= cutoff);
+                        }
+                    }
+                    window.renderAiCharts(filteredAi, null);
+                    window.renderTicketBrowser(filteredAi);
+                    window.renderAiReviewQueue(filteredAi);
+                };
+                window.filterAiDataAndRender();
             }
         } catch(e) {
             console.error('Error fetching AI Ticket Trends:', e);
@@ -3032,7 +3084,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const label = r.issue_type.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
             issueCounts[label] = (issueCounts[label] || 0) + 1;
         });
-        const sortedIssue = Object.entries(issueCounts).sort((a,b) => b[1] - a[1]).slice(0, 12);
+        const sortedIssue = Object.entries(issueCounts).sort((a,b) => b[1] - a[1]).slice(0, 50);
 
         const issueCtx = document.getElementById('aiIssueTypeChart');
         if (issueCtx) {
@@ -3043,7 +3095,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     datasets: [{
                         label: 'Tickets',
                         data: sortedIssue.map(i => i[1]),
-                        backgroundColor: PALETTE.slice(0, sortedIssue.length),
+                        backgroundColor: sortedIssue.map((_, i) => PALETTE[i % PALETTE.length]),
                         borderRadius: 4
                     }]
                 },
@@ -3182,7 +3234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!norm) return;
             prodCounts[norm] = (prodCounts[norm] || 0) + 1;
         });
-        const sortedProd = Object.entries(prodCounts).sort((a,b) => b[1] - a[1]).slice(0, 12);
+        const sortedProd = Object.entries(prodCounts).sort((a,b) => b[1] - a[1]).slice(0, 50);
 
         const prodCtx = document.getElementById('aiProductChart');
         if (prodCtx) {
@@ -3193,7 +3245,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     datasets: [{
                         label: 'Tickets',
                         data: sortedProd.map(i => i[1]),
-                        backgroundColor: PALETTE.slice(0, sortedProd.length),
+                        backgroundColor: sortedProd.map((_, i) => PALETTE[i % PALETTE.length]),
                         borderRadius: 4
                     }]
                 },
@@ -3541,12 +3593,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (statusProgress) statusProgress.textContent = '✅ ' + (batchInfo.ticketsProcessed || 0) + ' processed';
                     if (statusFailed)   statusFailed.textContent   = '❌ ' + (batchInfo.failedCount || 0) + ' failed';
                     if (statusSkipped)  statusSkipped.textContent  = '⏭ ' + (batchInfo.skippedCount || 0) + ' skipped';
+                    const warnEl = document.getElementById('ai-batch-exhausted-warning');
+                    if (warnEl) warnEl.classList.add('hidden');
                 } else {
                     clearInterval(aiPollingInterval);
                     window.stopAiBatch();
                     window.fetchAiData(); // Refresh logs and charts
                     
-                    if (batchInfo.ticketsProcessed === 0) {
+                    if (batchInfo.finishedStatus === 'exhausted') {
+                        const warnEl = document.getElementById('ai-batch-exhausted-warning');
+                        const warnText = document.getElementById('ai-batch-exhausted-text');
+                        if (warnEl) warnEl.classList.remove('hidden');
+                        if (warnText) warnText.textContent = `The AI has processed all eligible tickets within the specified timeframe. Processed in this run: ${batchInfo.ticketsProcessed || 0} tickets.`;
+                    } else if (batchInfo.ticketsProcessed === 0) {
                         alert("Batch completed: 0 tickets were found to process in the specified timeframe.");
                     }
                 }
