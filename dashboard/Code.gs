@@ -105,7 +105,9 @@ var NOISE_SUBJECT_PHRASES = [
   'melissa data subscription update',
   'file is complete and updated',
   'completed file posted on ftp',
-  'transactions low'
+  'transactions low',
+  'this message is to confirm that we have received your it request',
+  'we would like to acknowledge that we have received your request and a ticket has been created'
 ];
 
 function isNoiseSubject(subject) {
@@ -115,6 +117,20 @@ function isNoiseSubject(subject) {
     if (s.indexOf(NOISE_SUBJECT_PHRASES[i]) !== -1) return true;
   }
   if (s.indexOf('runner edq') !== -1 && s.indexOf('celebration') !== -1) return true;
+  return false;
+}
+
+function isNoiseBody(threadText) {
+  if (!threadText) return false;
+  var b = threadText.toLowerCase();
+  var noisePhrases = [
+    'this message is to confirm that we have received your it request',
+    'we would like to acknowledge that we have received your request and a ticket has been created',
+    'your service request has been received and will be assigned'
+  ];
+  for (var i = 0; i < noisePhrases.length; i++) {
+    if (b.indexOf(noisePhrases[i]) !== -1) return true;
+  }
   return false;
 }
 
@@ -775,7 +791,10 @@ function processTicket(ticketId, dryRun) {
     'listserv@list.unm.edu',                   // Specific listserv address — not a customer
     'samratkapoor620@gmail.com',               // Spam/unsolicited
     'no-reply@mermaid.ai',                     // Automated tool notification
-    'daas_alerts@informatica.com'              // Informatica automated alerts
+    'daas_alerts@informatica.com',             // Informatica automated alerts
+    'info@ellucian.com',                       // Known noise sender
+    'contactcloud@google.com',                 // Known noise sender
+    'partnerships@ellucian.com'                // Known noise sender
   ];
   var EXCLUDED_SENDER_DOMAINS = [
     'melissa.com', 'melissadata.com',          // Melissa file notifications
@@ -870,14 +889,34 @@ function processTicket(ticketId, dryRun) {
     return { status: "skipped", message: skipMsg };
   }
   
+  if (isNoiseBody(thread)) {
+    if (!dryRun) {
+      try {
+        var existingTags = ticket.tags || [];
+        if (existingTags.indexOf('ai:skipped-noise') === -1) {
+          existingTags.push('ai:skipped-noise');
+          UrlFetchApp.fetch(ticketUrl, {
+            'method': 'put',
+            'headers': { 'Authorization': fdOpts.headers.Authorization, 'Content-Type': 'application/json' },
+            'payload': JSON.stringify({ tags: existingTags }),
+            'muteHttpExceptions': true
+          });
+        }
+      } catch (e) {
+        Logger.log("Failed to tag noise ticket " + ticketId + ": " + e.message);
+      }
+    }
+    return { status: "skipped", message: "Skipped: Noise found in ticket thread body" };
+  }
+  
   // 3. Build Prompt
   var prompt = "You are a customer support intelligence agent. Analyze the following support ticket thread.\n\n" +
     "Ticket Thread:\n" + thread + "\n\n" +
     "Please provide a JSON response with the following keys:\n" +
     "- summary: A detailed summary of the problem, steps taken, and resolution. Paragraph format. Use the Agent Fields provided to contextualize your summary.\n" +
     "- proposed_subject: A revised subject line. You MUST include the brackets. If integration is 'None' or 'Unknown', format strictly as '[{Product Area}]: {Issue Type} - {Short Description}'. Otherwise, format strictly as '[{Product Area} - {Integration}]: {Issue Type} - {Short Description}'. (Max 80 chars)\n" +
-    "- issue_type: A short, specific 2-4 word phrase describing the exact type of issue (e.g., NCOA File Upload, Database Migration, Login Failure, SFTP Access). Be descriptive and specific so we can accurately analyze issue trends later. Do not restrict yourself to a predefined list.\n" +
-    "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'.\n" +
+    "- issue_type: A short, specific 2-4 word phrase describing the exact type of issue (e.g., NCOA File Upload, Database Migration, Login Failure, SFTP Access). Be descriptive and specific so we can accurately analyze issue trends later. If it's a failed unattended update, classify as 'System Error'. Do not restrict yourself to a predefined list.\n" +
+    "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, Geo Products Usage Reporting, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'. Tickets reporting geocoder usage, geopoints, or Geodata should be categorized as 'Geo Products Usage Reporting'.\n" +
     "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]'. If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces. Explicitly look for 'HCM', 'FIN', 'Finance', 'cs', 'Campus Solutions' (map to PeopleSoft - CS), 'Admin', 'ss', 'ssb', 'ss 9.x', 'self service' (map to Banner - Self Service), 'Classic', 'Fluid', 'EDI'. Format exactly as '[Base ERP] - [Module]'. If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, SurveyDIG, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
     "- platform: MUST be the exact Agent-Assigned Platform if provided. Otherwise: Cloud, Windows, Linux, or Other.\n" +
     "- severity: critical, high, medium, or low.\n" +
@@ -1151,9 +1190,17 @@ function batchProcessTickets(dryRun) {
   // GAS execution limit is 6 min. Stop after 4.5 min to safely save state.
   var MAX_EXECUTION_TIME_MS = 4.5 * 60 * 1000;
   
-  var d = new Date();
-  d.setDate(d.getDate() - daysBack);
-  var updatedSince = d.toISOString();
+  var startDateStr = props.getProperty('AI_Batch_StartDate');
+  var endDateStr   = props.getProperty('AI_Batch_EndDate');
+  var updatedSince;
+  
+  if (startDateStr) {
+    updatedSince = new Date(startDateStr).toISOString();
+  } else {
+    var d = new Date();
+    d.setDate(d.getDate() - daysBack);
+    updatedSince = d.toISOString();
+  }
   
   while (true) {
     if (new Date().getTime() - startTime > MAX_EXECUTION_TIME_MS) {
@@ -1209,12 +1256,32 @@ function batchProcessTickets(dryRun) {
       var ticketType   = tkts[i].type || '';
       var ticketDate   = new Date(tkts[i].created_at);
       
-      // Stop the batch if we've reached tickets older than our daysBack limit
-      if (daysBack > 0 && (new Date().getTime() - ticketDate.getTime()) / (1000 * 3600 * 24) > daysBack) {
-        props.setProperty('AI_Batch_Running', 'false');
-        jobFullyComplete = true;
-        Logger.log('Batch complete! Reached the ' + daysBack + ' day history limit.');
-        break;
+      // Filter by strict Date Range if provided
+      if (startDateStr) {
+        var sDate = new Date(startDateStr);
+        if (ticketDate.getTime() < sDate.getTime()) {
+          props.setProperty('AI_Batch_Running', 'false');
+          jobFullyComplete = true;
+          Logger.log('Batch complete! Reached the start date limit: ' + startDateStr);
+          break;
+        }
+        
+        if (endDateStr) {
+           var eDate = new Date(endDateStr);
+           eDate.setHours(23, 59, 59, 999);
+           if (ticketDate.getTime() > eDate.getTime()) {
+             // Skip processing this ticket but continue the loop
+             continue;
+           }
+        }
+      } else {
+        // Fallback to old daysBack logic
+        if (daysBack > 0 && (new Date().getTime() - ticketDate.getTime()) / (1000 * 3600 * 24) > daysBack) {
+          props.setProperty('AI_Batch_Running', 'false');
+          jobFullyComplete = true;
+          Logger.log('Batch complete! Reached the ' + daysBack + ' day history limit.');
+          break;
+        }
       }
       
       // 0. Only process Resolved (4) or Closed (5) tickets
@@ -2692,8 +2759,8 @@ function factoryResetAiData() {
   var ticketsReset = 0;
   
   while (true) {
-    // Use updated_since to fetch older tickets, not just the last 30 days
-    var url = 'https://' + domain + '/api/v2/tickets?per_page=100&updated_since=2024-01-01T00:00:00Z&order_by=created_at&order_type=desc&page=' + page;
+    // Use updated_since to fetch older tickets, sweeping the entire history
+    var url = 'https://' + domain + '/api/v2/tickets?per_page=100&updated_since=1970-01-01T00:00:00Z&order_by=created_at&order_type=desc&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) break;
     

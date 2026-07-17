@@ -2997,6 +2997,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Render the three AI charts ────────────────────────────────────────────
     window.renderAiCharts = function(data, errorMsg) {
+        window.cachedAiTickets = data;
         if (aiIssueChartInstance)       { aiIssueChartInstance.destroy();       aiIssueChartInstance = null; }
         if (aiIntegrationChartInstance) { aiIntegrationChartInstance.destroy(); aiIntegrationChartInstance = null; }
         if (aiProductChartInstance)     { aiProductChartInstance.destroy();     aiProductChartInstance = null; }
@@ -3053,6 +3054,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     scales: {
                         x: { ticks: { maxRotation: 35, minRotation: 20, font: { size: 11 } } },
                         y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    },
+                    onClick: (event, elements, chart) => {
+                        if (elements.length > 0) {
+                            const idx = elements[0].index;
+                            const label = chart.data.labels[idx];
+                            if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'issue_type') {
+                                window.aiTableFilter = null; // Toggle off
+                            } else {
+                                window.aiTableFilter = { column: 'issue_type', value: label };
+                            }
+                            window.renderTicketBrowser(window.cachedAiTickets);
+                        }
                     }
                 }
             });
@@ -3129,14 +3142,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     maintainAspectRatio: false,
                     plugins: { legend: { position: 'right', labels: { font: { size: 12 } } } },
                     onClick: (event, elements, chart) => {
-                        if (level === 'top' && elements.length > 0) {
+                        if (elements.length > 0) {
                             const idx = elements[0].index;
                             const label = chart.data.labels[idx];
-                            if (label === 'Data Enhancement Services (DES)') {
-                                window.renderIntegrationChart('des');
-                            } else if (window.cachedSubCounts[label] && Object.keys(window.cachedSubCounts[label]).length > 0) {
-                                // Drill down into ERP modules
-                                window.renderIntegrationChart(label);
+                            if (level === 'top') {
+                                if (label === 'Data Enhancement Services (DES)') {
+                                    window.renderIntegrationChart('des');
+                                } else if (window.cachedSubCounts[label] && Object.keys(window.cachedSubCounts[label]).length > 0) {
+                                    // Drill down into ERP modules
+                                    window.renderIntegrationChart(label);
+                                } else {
+                                    if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'integration') {
+                                        window.aiTableFilter = null;
+                                    } else {
+                                        window.aiTableFilter = { column: 'integration', value: label, level: 'top' };
+                                    }
+                                    window.renderTicketBrowser(window.cachedAiTickets);
+                                }
+                            } else {
+                                if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'integration') {
+                                    window.aiTableFilter = null;
+                                } else {
+                                    window.aiTableFilter = { column: 'integration', value: label, level: level };
+                                }
+                                window.renderTicketBrowser(window.cachedAiTickets);
                             }
                         }
                     }
@@ -3175,6 +3204,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     scales: {
                         x: { ticks: { maxRotation: 35, minRotation: 20, font: { size: 11 } } },
                         y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    },
+                    onClick: (event, elements, chart) => {
+                        if (elements.length > 0) {
+                            const idx = elements[0].index;
+                            const label = chart.data.labels[idx];
+                            if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'product_area') {
+                                window.aiTableFilter = null; // Toggle off
+                            } else {
+                                window.aiTableFilter = { column: 'product_area', value: label };
+                            }
+                            window.renderTicketBrowser(window.cachedAiTickets);
+                        }
                     }
                 }
             });
@@ -3187,8 +3228,45 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!container) return;
         container.innerHTML = '';
 
-        if (!data || data.length === 0) {
-            container.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">No tickets processed yet.</td></tr>';
+        let filteredData = data || [];
+        if (window.aiTableFilter && window.aiTableFilter.value) {
+            filteredData = filteredData.filter(r => {
+                if (window.aiTableFilter.column === 'issue_type') {
+                    const label = r.issue_type ? r.issue_type.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : '';
+                    return label === window.aiTableFilter.value;
+                } else if (window.aiTableFilter.column === 'product_area') {
+                    return normaliseProduct(r.product_area) === window.aiTableFilter.value;
+                } else if (window.aiTableFilter.column === 'integration') {
+                    const norm = normaliseIntegration(r.integration || '');
+                    if (window.aiTableFilter.level === 'top') return norm === window.aiTableFilter.value;
+                    if (window.aiTableFilter.level === 'des') {
+                        let raw = (r.integration || '').trim();
+                        let sub = raw.replace(/^des\s*-\s*/i, '').trim();
+                        if (!sub || sub.toLowerCase() === 'des') sub = 'Other DES';
+                        sub = sub.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                        return sub === window.aiTableFilter.value;
+                    }
+                    if (window.aiTableFilter.level) {
+                        if (norm !== window.aiTableFilter.level) return false;
+                        let raw = (r.integration || '').trim();
+                        let sub = 'Base / Core';
+                        if (raw.includes('-')) {
+                            sub = raw.split('-').slice(1).join('-').trim();
+                            if (!sub) sub = 'Base / Core';
+                        }
+                        return sub === window.aiTableFilter.value;
+                    }
+                }
+                return true;
+            });
+        }
+
+        if (!filteredData || filteredData.length === 0) {
+            let msg = 'No tickets processed yet.';
+            if (window.aiTableFilter && window.aiTableFilter.value) {
+                msg = `No tickets match the filter: <b>${window.aiTableFilter.value}</b>.<br><a href="#" onclick="window.aiTableFilter=null; window.renderTicketBrowser(window.cachedAiTickets); return false;" class="text-indigo-600 hover:underline mt-2 inline-block">Clear Filter</a>`;
+            }
+            container.innerHTML = `<tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">${msg}</td></tr>`;
             return;
         }
 
@@ -3207,7 +3285,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // Sort newest first by processed date, fallback to created date
-        const sorted = [...data].sort((a,b) => {
+        const sorted = [...filteredData].sort((a,b) => {
             const dateA = a.processed_at ? new Date(a.processed_at) : new Date(a.date);
             const dateB = b.processed_at ? new Date(b.processed_at) : new Date(b.date);
             return dateB - dateA;
