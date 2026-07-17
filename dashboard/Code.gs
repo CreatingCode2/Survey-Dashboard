@@ -2692,7 +2692,8 @@ function factoryResetAiData() {
   var ticketsReset = 0;
   
   while (true) {
-    var url = 'https://' + domain + '/api/v2/tickets?per_page=100&order_by=created_at&order_type=desc&page=' + page;
+    // Use updated_since to fetch older tickets, not just the last 30 days
+    var url = 'https://' + domain + '/api/v2/tickets?per_page=100&updated_since=2024-01-01T00:00:00Z&order_by=created_at&order_type=desc&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) break;
     
@@ -2704,16 +2705,28 @@ function factoryResetAiData() {
       var t = tkts[i];
       var tags = t.tags || [];
       var newTags = [];
+      var hasAiTag = false;
       
       for (var j = 0; j < tags.length; j++) {
         if (tags[j].indexOf('ai:') !== 0 || tags[j] === 'ai:skipped' || tags[j] === 'ai:skipped-noise') {
           newTags.push(tags[j]);
+        } else {
+          hasAiTag = true; // Found an AI tag that needs removing
         }
+      }
+      
+      var cf = t.custom_fields || {};
+      var hasCustomFields = !!(cf.cf_revised_subject_name || cf.cf_ai_proposed_subject || cf.cf_ai_summary_notes || cf.cf_ai_product_area || cf.cf_ai_integration || cf.cf_ai_severity);
+
+      // Skip PUT request if this ticket has no AI data to remove
+      if (!hasAiTag && !hasCustomFields) {
+        continue;
       }
       
       var updatePayload = {
         tags: newTags,
         custom_fields: {
+          cf_revised_subject_name: null,
           cf_ai_proposed_subject: null,
           cf_ai_summary_notes: null,
           cf_ai_product_area: null,
