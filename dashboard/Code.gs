@@ -129,7 +129,8 @@ function isNoiseBody(threadText) {
     'your service request has been received and will be assigned',
     'this is an acknowledgement mail for your request',
     'it requests your assistance to help improve our service to you! we value your feedback and look forward to hearing from you.',
-    'a full walk-out strike has been called by the ontario public service employees union (opseu),'
+    'a full walk-out strike has been called by the ontario public service employees union (opseu),',
+    'i\'m reaching out to see if you\'d be interested in our recently verified list'
   ];
   for (var i = 0; i < noisePhrases.length; i++) {
     if (b.indexOf(noisePhrases[i]) !== -1) return true;
@@ -805,7 +806,14 @@ function processTicket(ticketId, dryRun) {
     'partnernews@partner.hornetsecurity.com',
     'm365copilotupdates@microsoft.com',
     'notify@teamdynamixapp.com',
-    'no-reply@notify.microsoft.com'
+    'no-reply@notify.microsoft.com',
+    'noreply@canadapost.ca',
+    'marketing@info.melissa.hs-inbox.com',
+    'raquel.m@optimaglobsol.com',
+    'procdergeschfitz1997@access.connectaccessonline.co',
+    'sara.jacobs@techproviders.site',
+    'postmaster@illinoisstateuniversity.onmicrosoft.com',
+    'postmaster@rbauction.onmicrosoft.com'
   ];
   var EXCLUDED_SENDER_DOMAINS = [
     'melissa.com', 'melissadata.com',          // Melissa file notifications
@@ -920,6 +928,13 @@ function processTicket(ticketId, dryRun) {
     return { status: "skipped", message: "Skipped: Noise found in ticket thread body" };
   }
   
+  // Truncate thread if it's extremely long to prevent Groq API Token limits (6000 TPM max)
+  if (thread && thread.length > 15000) {
+    var topPart = thread.substring(0, 5000);
+    var bottomPart = thread.substring(thread.length - 10000);
+    thread = topPart + "\n\n...[TRUNCATED DUE TO LENGTH]...\n\n" + bottomPart;
+  }
+  
   // 3. Build Prompt
   var prompt = "You are a customer support intelligence agent. Analyze the following support ticket thread.\n\n" +
     "Ticket Thread:\n" + thread + "\n\n" +
@@ -927,7 +942,7 @@ function processTicket(ticketId, dryRun) {
     "- summary: A detailed summary of the problem, steps taken, and resolution. Paragraph format. Use the Agent Fields provided to contextualize your summary.\n" +
     "- proposed_subject: A revised subject line. You MUST include the brackets. If integration is 'None' or 'Unknown', format strictly as '[{Product Area}]: {Issue Type} - {Short Description}'. Otherwise, format strictly as '[{Product Area} - {Integration}]: {Issue Type} - {Short Description}'. (Max 80 chars)\n" +
     "- issue_type: A short, specific 2-4 word phrase describing the exact type of issue (e.g., NCOA File Upload, Database Migration, Login Failure, SFTP Access). Be descriptive and specific so we can accurately analyze issue trends later. IMPORTANT: Tickets reporting geocoder usage, geopoints, or Geodata should be explicitly categorized as 'Geo Products Usage Reporting'. Otherwise, do not restrict yourself to a predefined list.\n" +
-    "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, and Data Enhancement batch jobs are product_area = 'Data Enhancement Services'.\n" +
+    "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, Data Enhancement batch jobs, and tickets reporting geocoder usage/geopoints/Geodata are product_area = 'Data Enhancement Services'.\n" +
     "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]'. If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces. Explicitly look for 'HCM', 'FIN', 'Finance', 'cs', 'Campus Solutions' (map to PeopleSoft - CS), 'Admin', 'ss', 'ssb', 'ss 9.x', 'self service' (map to Banner - Self Service), 'Classic', 'Fluid', 'EDI'. Format exactly as '[Base ERP] - [Module]'. If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, SurveyDIG, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
     "- platform: MUST be the exact Agent-Assigned Platform if provided. Otherwise: Cloud, Windows, Linux, or Other.\n" +
     "- severity: critical, high, medium, or low.\n" +

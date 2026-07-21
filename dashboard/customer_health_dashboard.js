@@ -1138,9 +1138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const navData = document.getElementById('nav-data');
         const navTickets = document.getElementById('nav-tickets');
         
-        if (navTriage) navTriage.style.display = (currentUser.role === 'admin' || currentUser.role === 'csm') ? 'flex' : 'none';
-        if (navData) navData.style.display = (currentUser.canAccessData) ? 'block' : 'none';
-        if (navTickets) navTickets.style.display = (currentUser.canAccessIntel) ? 'block' : 'none';
+        // All navigation tabs are always visible. Access control is handled in navigateTo().
         
         // If current view is hidden, switch to dashboard
         if (!isLoggedIn && (currentView === 'triage' || currentView === 'data' || currentView === 'tickets')) {
@@ -1677,10 +1675,20 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function navigateTo(viewName) {
-        // Authentication check for protected views
-        if ((viewName === 'tickets' || viewName === 'data') && (!currentUser || !currentUser.email)) {
-            alert('You must be logged in to view ' + (viewName === 'tickets' ? 'Ticket Intelligence' : 'the Data Table') + '.');
-            return;
+        // Authentication & Permission checks for protected views
+        if (viewName !== 'dashboard') {
+            if (!currentUser || !currentUser.email) {
+                alert('You must be logged in to access this tab.');
+                return;
+            }
+            if (viewName === 'data' && !currentUser.canAccessData) {
+                alert('You do not have permission to view the Data Table.');
+                return;
+            }
+            if (viewName === 'tickets' && !currentUser.canAccessIntel) {
+                alert('You do not have permission to view Ticket Intelligence.');
+                return;
+            }
         }
 
         currentView = viewName;
