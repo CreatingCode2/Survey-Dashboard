@@ -80,9 +80,10 @@ function getUserPermissions(email) {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
-var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847];
+var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847, 87300];
 
 var NOISE_SUBJECT_PHRASES = [
+  'wеllsfаrgо оniinе',
   'out of office',
   'automatic reply',
   'auto-reply',
@@ -124,6 +125,7 @@ function isNoiseBody(threadText) {
   if (!threadText) return false;
   var b = threadText.toLowerCase();
   var noisePhrases = [
+    'wеllsfаrgо оniinе',
     'this message is to confirm that we have received your it request',
     'we would like to acknowledge that we have received your request and a ticket has been created',
     'your service request has been received and will be assigned',
@@ -790,6 +792,8 @@ function processTicket(ticketId, dryRun) {
   
   // 4b. Block tickets from known noise sender emails/domains
   var EXCLUDED_SENDER_EMAILS = [
+    'ltac@sulross.edu',
+    'anaspayna2000@portal.securelocksystems.com',
     'giselle.mazurat@runnertechnologies.com',  // Internal Runner — not customer tickets
     'lourdes.delfin@runchero.com',             // Known noise sender
     'listserv@list.unm.edu',                   // Specific listserv address — not a customer
@@ -875,7 +879,7 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 6. Hardcoded Tickets to Ignore and specific subject phrases
-  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395];
+  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300];
   if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
     isNoiseTicket = true;
   }

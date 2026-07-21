@@ -2952,6 +2952,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 return;
                             }
                             
+                            let html = '';
                             filtered.slice(0, 300).forEach(log => {
                                 const statusColor  = log.status === 'success' ? 'text-green-600' : (log.status === 'skipped' ? 'text-yellow-600' : 'text-red-600');
                                 const fdUrl        = `https://runnertech.freshdesk.com/a/tickets/${log.ticket_id}`;
@@ -2962,7 +2963,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const summaryCell  = log.summary
                                     ? `<span class="text-xs text-gray-600 line-clamp-2" title="${log.summary.replace(/"/g,"'")}">${log.summary.substring(0,120)}${log.summary.length > 120 ? '…' : ''}</span>`
                                     : '<span class="text-xs text-gray-400">—</span>';
-                                tbody.innerHTML += `
+                                html += `
                                     <tr class="hover:bg-gray-50">
                                         <td class="px-3 py-2 whitespace-nowrap text-gray-500">${new Date(log.timestamp).toLocaleString()}</td>
                                         <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
@@ -2975,6 +2976,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     </tr>
                                 `;
                             });
+                            tbody.innerHTML = html;
                         };
                     }
                     window.renderAiLogTable();
@@ -3404,6 +3406,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        let html = '';
         flagged.forEach(r => {
             const fdUrl      = `https://runnertech.freshdesk.com/a/tickets/${r.ticket_id}`;
             const issueType  = (r.issue_type  || '—').trim();
@@ -3421,7 +3424,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const b64Int = btoa(encodeURIComponent(r.integration || 'None'));
                     const b64Prod = btoa(encodeURIComponent(r.product_area || 'Other'));
 
-                    container.innerHTML += `
+                    html += `
                 <tr class="hover:bg-amber-50">
                     <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
                         <a href="${fdUrl}" target="_blank" class="hover:underline">#${r.ticket_id}</a>
@@ -3440,6 +3443,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </tr>
             `;
         });
+        container.innerHTML = html;
     };
 
     // ── Batch job controls ────────────────────────────────────────────────────
