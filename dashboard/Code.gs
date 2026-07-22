@@ -80,7 +80,7 @@ function getUserPermissions(email) {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
-var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847, 87300];
+var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847, 87300, 86863, 88551, 88552];
 
 var NOISE_SUBJECT_PHRASES = [
   'wеllsfаrgо оniinе',
@@ -879,7 +879,7 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 6. Hardcoded Tickets to Ignore and specific subject phrases
-  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300];
+  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300, 86863, 88551, 88552];
   if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
     isNoiseTicket = true;
   }
