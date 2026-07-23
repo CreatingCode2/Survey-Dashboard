@@ -80,7 +80,7 @@ function getUserPermissions(email) {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
-var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 90847, 87300, 86863, 88551, 88552];
+var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 90847, 87300, 86863, 88551, 88552];
 
 var NOISE_SUBJECT_PHRASES = [
   'wеllsfаrgо оniinе',
@@ -879,7 +879,7 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 6. Hardcoded Tickets to Ignore and specific subject phrases
-  var HARDCODED_IGNORED_TICKETS = [90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300, 86863, 88551, 88552];
+  var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300, 86863, 88551, 88552];
   if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
     isNoiseTicket = true;
   }
@@ -947,7 +947,7 @@ function processTicket(ticketId, dryRun) {
     "- proposed_subject: A revised subject line. You MUST include the brackets. If integration is 'None' or 'Unknown', format strictly as '[{Product Area}]: {Issue Type} - {Short Description}'. Otherwise, format strictly as '[{Product Area} - {Integration}]: {Issue Type} - {Short Description}'. (Max 80 chars)\n" +
     "- issue_type: A short, specific 2-4 word phrase describing the exact type of issue (e.g., NCOA File Upload, Database Migration, Login Failure, SFTP Access). Be descriptive and specific so we can accurately analyze issue trends later. IMPORTANT: Tickets reporting geocoder usage, geopoints, or Geodata should be explicitly categorized as 'Geo Products Usage Reporting'. Otherwise, do not restrict yourself to a predefined list.\n" +
     "- product_area: MUST be the exact Agent-Assigned Product Area/Solution if provided. Otherwise classify using ONLY these exact values: CLEAN_Address, CLEAN_Cloud, CLEAN_Data Portal, CLEAN_Entry, CLEAN_File, CLEAN_Update, Data Enhancement Services, Documentation, SurveyDIG, On boarding, Other. IMPORTANT: FTP file delivery tickets, SFTP access tickets, NCOA processing tickets, Data Enhancement batch jobs, and tickets reporting geocoder usage/geopoints/Geodata are product_area = 'Data Enhancement Services'.\n" +
-    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]'. If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces. Explicitly look for 'HCM', 'FIN', 'Finance', 'cs', 'Campus Solutions' (map to PeopleSoft - CS), 'Admin', 'ss', 'ssb', 'ss 9.x', 'self service' (map to Banner - Self Service), 'Classic', 'Fluid', 'EDI'. Format exactly as '[Base ERP] - [Module]'. If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, SurveyDIG, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
+    "- integration: If the ticket is for a Data Enhancement Service, format as 'DES - [Service]' and use ONLY these specific sub-categories: NCOA, MCOA, PCOA, Email Append, Phone Append, CCOA, Demographic Data, GeoCoding, Global Address Verification. If it involves an ERP or Integration, you MUST aggressively scan the conversation for specific modules or interfaces. Explicitly look for 'HCM', 'FIN', 'Finance', 'cs', 'Campus Solutions' (map to PeopleSoft - CS), 'Admin', 'ss', 'ssb', 'ss 9.x', 'self service' (map to Banner - Self Service), 'Classic', 'Fluid', 'EDI'. Format exactly as '[Base ERP] - [Module]'. You may output sub-categories like 'PeopleSoft - Fluid' or 'PeopleSoft - Classic', but MUST enforce the strict acronyms 'CS', 'HCM', and 'FIN' (e.g. use 'PeopleSoft - CS', NOT 'PeopleSoft - Campus Solutions'). If SurveyDIG is mentioned, output 'SurveyDIG'. DO NOT output 'Text Connector' or 'Guild Core Engine'. Valid Base ERPs: Advance, Banner, PeopleSoft, Colleague, JD Edwards, Oracle EBS, Oracle Database, SurveyDIG, None. CRITICAL: FTP, SFTP, and file processing are NOT integrations - use 'None' for those.\n" +
     "- platform: MUST be the exact Agent-Assigned Platform if provided. Otherwise: Cloud, Windows, Linux, or Other.\n" +
     "- severity: critical, high, medium, or low.\n" +
     "- resolution: solution-provided, fixed-bug, user-error, workaround-provided, escalated, or pending.\n" +
@@ -1293,27 +1293,29 @@ function batchProcessTickets(dryRun) {
       if (startDateStr) {
         var sDate = new Date(startDateStr);
         if (ticketDate.getTime() < sDate.getTime()) {
-          props.setProperty('AI_Batch_Running', 'false');
-          jobFullyComplete = true;
-          Logger.log('Batch complete! Reached the start date limit: ' + startDateStr);
-          break;
+          var skipMsg = 'Skipped: Created date (' + ticketDate.toISOString().split('T')[0] + ') is before start date limit (' + startDateStr + ')';
+          logAiProcessing(ticketId, 'skipped', skipMsg, dryRun, null);
+          skippedCount++;
+          continue;
         }
         
         if (endDateStr) {
            var eDate = new Date(endDateStr);
            eDate.setHours(23, 59, 59, 999);
            if (ticketDate.getTime() > eDate.getTime()) {
-             // Skip processing this ticket but continue the loop
+             var skipMsg2 = 'Skipped: Created date (' + ticketDate.toISOString().split('T')[0] + ') is after end date limit (' + endDateStr + ')';
+             logAiProcessing(ticketId, 'skipped', skipMsg2, dryRun, null);
+             skippedCount++;
              continue;
            }
         }
       } else {
         // Fallback to old daysBack logic
         if (daysBack > 0 && (new Date().getTime() - ticketDate.getTime()) / (1000 * 3600 * 24) > daysBack) {
-          props.setProperty('AI_Batch_Running', 'false');
-          jobFullyComplete = true;
-          Logger.log('Batch complete! Reached the ' + daysBack + ' day history limit.');
-          break;
+          var skipMsg3 = 'Skipped: Created date (' + ticketDate.toISOString().split('T')[0] + ') exceeds ' + daysBack + ' daysBack limit';
+          logAiProcessing(ticketId, 'skipped', skipMsg3, dryRun, null);
+          skippedCount++;
+          continue;
         }
       }
       

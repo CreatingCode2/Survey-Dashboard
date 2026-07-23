@@ -3435,10 +3435,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="px-3 py-2 whitespace-nowrap text-sm">${resolution}</td>
                     <td class="px-3 py-2 text-xs text-amber-700 font-medium">${flags.join(', ')}</td>
                     <td class="px-3 py-2 whitespace-nowrap text-center">
-                        <button onclick="openOverrideModal(${r.ticket_id}, '${b64Subject}', '${b64Int}', '${b64Prod}')" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Manually edit subject, integration, and product area">Edit</button>
-                        <button onclick="dismissAiTicket(${r.ticket_id})" class="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs font-semibold mr-1" title="Accept this classification and clear it from the queue (keeps it in your charts)">Dismiss</button>
-                        <button onclick="skipAiTicket(${r.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold mr-1" title="Remove from charts and mark as noise forever">Noise</button>
-                        <button onclick="reprocessAiTicket(${r.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold" title="Re-run AI classification on this ticket">Re-run</button>
+                        <button type="button" onclick="openOverrideModal(${r.ticket_id}, '${b64Subject}', '${b64Int}', '${b64Prod}')" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Manually edit subject, integration, and product area">Edit</button>
+                        <button type="button" onclick="dismissAiTicket(${r.ticket_id})" class="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs font-semibold mr-1" title="Accept this classification and clear it from the queue (keeps it in your charts)">Dismiss</button>
+                        <button type="button" onclick="skipAiTicket(${r.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold mr-1" title="Remove from charts and mark as noise forever">Noise</button>
+                        <button type="button" onclick="reprocessAiTicket(${r.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold" title="Re-run AI classification on this ticket">Re-run</button>
                     </td>
                 </tr>
             `;
@@ -3669,33 +3669,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── AI Queue Action Handlers ─────────────────────────────────────────────
     window.openOverrideModal = function(ticketId, b64Subject, b64Int, b64Prod) {
-        const currentSubject = decodeURIComponent(atob(b64Subject));
-        const currentIntegration = decodeURIComponent(atob(b64Int));
-        const currentProduct = decodeURIComponent(atob(b64Prod));
+        try {
+            const currentSubject = decodeURIComponent(atob(b64Subject));
+            const currentIntegration = decodeURIComponent(atob(b64Int));
+            const currentProduct = decodeURIComponent(atob(b64Prod));
 
-        document.getElementById('override-ticket-id').value = ticketId;
-        document.getElementById('override-subject').value = currentSubject;
-        
-        // Set dropdown values if they exist, otherwise fallback
-        const intSelect = document.getElementById('override-integration');
-        if (Array.from(intSelect.options).some(o => o.value === currentIntegration)) {
-            intSelect.value = currentIntegration;
-        } else {
-            intSelect.value = 'Unknown';
+            document.getElementById('override-ticket-id').value = ticketId;
+            document.getElementById('override-subject').value = currentSubject;
+            
+            // Set dropdown values if they exist, otherwise fallback
+            const intSelect = document.getElementById('override-integration');
+            if (Array.from(intSelect.options).some(o => o.value === currentIntegration)) {
+                intSelect.value = currentIntegration;
+            } else {
+                intSelect.value = 'Unknown';
+            }
+
+            const prodSelect = document.getElementById('override-product');
+            if (Array.from(prodSelect.options).some(o => o.value === currentProduct)) {
+                prodSelect.value = currentProduct;
+            } else {
+                prodSelect.value = 'Other';
+            }
+
+            document.getElementById('override-status').textContent = '';
+            
+            const modal = document.getElementById('override-modal');
+            if (modal) {
+                modal.classList.remove('invisible', 'opacity-0');
+                modal.classList.add('visible', 'opacity-100');
+            } else {
+                console.error("override-modal element not found");
+                alert("Error: Modal could not be found.");
+            }
+        } catch (e) {
+            console.error("Error opening override modal:", e);
+            alert("Error opening modal: " + e.message);
         }
-
-        const prodSelect = document.getElementById('override-product');
-        if (Array.from(prodSelect.options).some(o => o.value === currentProduct)) {
-            prodSelect.value = currentProduct;
-        } else {
-            prodSelect.value = 'Other';
-        }
-
-        document.getElementById('override-status').textContent = '';
-        
-        const modal = document.getElementById('override-modal');
-        modal.classList.remove('invisible', 'opacity-0');
-        modal.classList.add('visible', 'opacity-100');
     };
 
     window.closeOverrideModal = function() {
