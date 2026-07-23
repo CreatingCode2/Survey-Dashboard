@@ -2977,3 +2977,9 @@ function cleanupFactoryResetTriggers_() {
     }
   }
 }
+
+function forceUnlockFactoryReset() {
+  PropertiesService.getScriptProperties().deleteProperty('FactoryReset_Running');
+  Logger.log('Lock cleared. You can now run factoryResetAiData() again.');
+}
+
