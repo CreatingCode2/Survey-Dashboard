@@ -1281,6 +1281,10 @@ function batchProcessTickets(dryRun) {
       break;
     }
     
+    // Track how many tickets on this page fall outside the date window.
+    // If ALL tickets on a page are out of bounds, the batch is exhausted — stop paginating.
+    var outOfBoundsCount = 0;
+
     for (var i = 0; i < tkts.length; i++) {
       if (new Date().getTime() - startTime > MAX_EXECUTION_TIME_MS) break;
       
@@ -1289,12 +1293,14 @@ function batchProcessTickets(dryRun) {
       var ticketType   = tkts[i].type || '';
       var ticketDate   = new Date(tkts[i].created_at);
       
-      // Filter by strict Date Range if provided
+      // Filter by strict Date Range if provided.
+      // NOTE: We use continue (not break) because the API sorts by updated_at, not created_at.
+      // Tickets can appear out of created_at order — we must scan the whole page.
       if (startDateStr) {
         var sDate = new Date(startDateStr);
         if (ticketDate.getTime() < sDate.getTime()) {
-          var skipMsg = 'Skipped: Created date (' + ticketDate.toISOString().split('T')[0] + ') is before start date limit (' + startDateStr + ')';
-          logAiProcessing(ticketId, 'skipped', skipMsg, dryRun, null);
+          Logger.log('[BATCH-SKIP] Ticket #' + ticketId + ' created ' + ticketDate.toISOString().split('T')[0] + ' is before startDate ' + startDateStr);
+          outOfBoundsCount++;
           skippedCount++;
           continue;
         }
@@ -1303,8 +1309,8 @@ function batchProcessTickets(dryRun) {
            var eDate = new Date(endDateStr);
            eDate.setHours(23, 59, 59, 999);
            if (ticketDate.getTime() > eDate.getTime()) {
-             var skipMsg2 = 'Skipped: Created date (' + ticketDate.toISOString().split('T')[0] + ') is after end date limit (' + endDateStr + ')';
-             logAiProcessing(ticketId, 'skipped', skipMsg2, dryRun, null);
+             Logger.log('[BATCH-SKIP] Ticket #' + ticketId + ' created ' + ticketDate.toISOString().split('T')[0] + ' is after endDate ' + endDateStr);
+             outOfBoundsCount++;
              skippedCount++;
              continue;
            }
@@ -1312,8 +1318,8 @@ function batchProcessTickets(dryRun) {
       } else {
         // Fallback to old daysBack logic
         if (daysBack > 0 && (new Date().getTime() - ticketDate.getTime()) / (1000 * 3600 * 24) > daysBack) {
-          var skipMsg3 = 'Skipped: Created date (' + ticketDate.toISOString().split('T')[0] + ') exceeds ' + daysBack + ' daysBack limit';
-          logAiProcessing(ticketId, 'skipped', skipMsg3, dryRun, null);
+          Logger.log('[BATCH-SKIP] Ticket #' + ticketId + ' created ' + ticketDate.toISOString().split('T')[0] + ' exceeds daysBack limit of ' + daysBack);
+          outOfBoundsCount++;
           skippedCount++;
           continue;
         }
@@ -1365,12 +1371,15 @@ function batchProcessTickets(dryRun) {
       }
 
       if (alreadyProcessed) {
-        // We log alreadyProcessed tickets ONLY if overwrite is not requested (but wait, overwrite isn't implemented here yet!)
+        // If overwrite is not enabled, skip this ticket to conserve API credits.
+        // If overwrite IS enabled, fall through and re-process it below.
         var overwrite = props.getProperty('AI_Batch_Overwrite') === 'true';
         if (!overwrite) {
           skippedCount++;
+          Logger.log('[BATCH-SKIP] Ticket #' + ticketId + ' already processed (has ai: tags or cf_ai_summary_notes). Enable Overwrite to re-process.');
           continue;
         }
+        Logger.log('[BATCH-OVERWRITE] Ticket #' + ticketId + ' already processed but overwrite=true — re-processing.');
       }
       
       // 4. Process the ticket
@@ -1406,7 +1415,16 @@ function batchProcessTickets(dryRun) {
       Utilities.sleep(2000);
     }
     
-    // If jobFullyComplete was set inside the inner loop (daysBack hit, limit hit),
+    // ── Page Exhaustion Safeguard ─────────────────────────────────────────────
+    // If every ticket on this page was outside the date window, we have gone
+    // past the relevant date range. Stop paginating — there is nothing left.
+    if (outOfBoundsCount > 0 && outOfBoundsCount === tkts.length) {
+      props.setProperty('AI_Batch_Running', 'false');
+      jobFullyComplete = true;
+      Logger.log('[BATCH-COMPLETE] Entire page of ' + tkts.length + ' tickets was outside the date window. Batch exhausted — stopping pagination.');
+    }
+
+    // If jobFullyComplete was set inside the inner loop (limit hit) or above (page exhaustion),
     // break out of the outer while immediately — do NOT advance to the next page.
     if (jobFullyComplete) break;
     
