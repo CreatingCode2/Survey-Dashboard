@@ -3496,9 +3496,11 @@ document.addEventListener('DOMContentLoaded', () => {
         btnStart.disabled = true;
         btnStart.innerHTML = '<span>⏳</span> Starting...';
 
-        const modeLabel  = dryRun ? '📝 Dry-Run Audit' : '⚡ Live Run';
+        const modeLabel  = dryRun ? '🔍 Dry-Run Audit' : '🚀 Live Run';
         const limitLabel = limit > 0 ? ` (Limit: ${limit})` : '';
-        if (statusText) statusText.textContent = `Batch job running — ${modeLabel}${limitLabel}...`;
+        if (statusText) statusText.textContent = `Batch job running 🔄 ${modeLabel}${limitLabel}...`;
+
+        console.log(`[DASHBOARD] startAiBatch — mode: ${modeLabel}, dryRun: ${dryRun}, overwrite: ${overwrite}, limit: ${limit}, daysBack: ${daysBack}, startDate: ${startDate}, endDate: ${endDate}, user: ${currentUser.email}`);
 
         fetch(SHEET_URL, {
             method: 'POST',
@@ -3515,8 +3517,8 @@ document.addEventListener('DOMContentLoaded', () => {
             })
         })
         .then(res => res.json())
-        .then(data => { console.log(`✅ Batch trigger acknowledged (${modeLabel}):`, data); })
-        .catch(err => { console.warn('Batch start fetch timed out (GAS may still be running):', err.message); });
+        .then(data => { console.log(`[DASHBOARD] Batch trigger acknowledged (${modeLabel}):`, data); })
+        .catch(err => { console.warn('[DASHBOARD] Batch start fetch timed out (GAS may still be running):', err.message); });
 
         if (btnStart)  btnStart.classList.add('hidden');
         if (btnStop)   btnStop.classList.remove('hidden');
@@ -3525,10 +3527,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.stopAiBatch = function() {
+        console.log('[DASHBOARD] stopAiBatch — sending stop signal to server.');
         fetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({ action: 'stop_batch_ai' })
-        }).catch(err => console.warn('Stop batch signal failed (may have already finished):', err));
+        }).catch(err => console.warn('[DASHBOARD] Stop batch signal failed (may have already finished):', err));
 
         if (aiPollingInterval) clearInterval(aiPollingInterval);
         const btnStart       = document.getElementById('start-ai-batch-btn');
@@ -3599,15 +3602,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const statusSkipped  = document.getElementById('ai-status-skipped');
 
                 const batchInfo = data.message || data;
+                console.log('[DASHBOARD] pollAiBatchStatus —', batchInfo);
 
                 if (batchInfo.running) {
                     if (statusText)     statusText.textContent     = 'Batch job running (Page ' + (batchInfo.page || 1) + ')...';
-                    if (statusProgress) statusProgress.textContent = '✅ ' + (batchInfo.ticketsProcessed || 0) + ' processed';
+                    if (statusProgress) statusProgress.textContent = '🔄 ' + (batchInfo.ticketsProcessed || 0) + ' processed';
                     if (statusFailed)   statusFailed.textContent   = '❌ ' + (batchInfo.failedCount || 0) + ' failed';
                     if (statusSkipped)  statusSkipped.textContent  = '⏭ ' + (batchInfo.skippedCount || 0) + ' skipped';
                     const warnEl = document.getElementById('ai-batch-exhausted-warning');
                     if (warnEl) warnEl.classList.add('hidden');
                 } else {
+                    console.log('[DASHBOARD] Batch no longer running — finishedStatus:', batchInfo.finishedStatus, '| processed:', batchInfo.ticketsProcessed);
                     clearInterval(aiPollingInterval);
                     window.stopAiBatch();
                     window.fetchAiData(); // Refresh logs and charts
@@ -3618,11 +3623,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (warnEl) warnEl.classList.remove('hidden');
                         if (warnText) warnText.textContent = `The AI has processed all eligible tickets within the specified timeframe. Processed in this run: ${batchInfo.ticketsProcessed || 0} tickets.`;
                     } else if (batchInfo.ticketsProcessed === 0) {
+                        console.warn('[DASHBOARD] Batch completed with 0 tickets processed. Check Apps Script Executions log for [BATCH-SKIP] entries.');
                         alert("Batch completed: 0 tickets were found to process in the specified timeframe.");
                     }
                 }
             })
-            .catch(err => { console.error('Error polling AI status:', err); });
+            .catch(err => { console.error('[DASHBOARD] Error polling AI status:', err); });
         }, 5000);
     }
 
@@ -3633,6 +3639,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
 
         const forceReprocess = document.getElementById('manual-force-reprocess') && document.getElementById('manual-force-reprocess').checked;
+        console.log(`[DASHBOARD] processSingleTicket — ticketId: ${ticketId}, forceReprocess: ${forceReprocess}, user: ${currentUser.email}`);
 
         fetch(SHEET_URL, {
             method: 'POST',
@@ -3646,14 +3653,19 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(res => res.json())
         .then(data => {
+            console.log(`[DASHBOARD] processSingleTicket response for #${ticketId}:`, data);
             alert(data.status === 'success' ? `✅ Ticket #${ticketId} processed successfully.` : `❌ Error: ${data.message}`);
             window.fetchAiData();
         })
-        .catch(err => { alert('Error: ' + err.message); });
+        .catch(err => {
+            console.error(`[DASHBOARD] processSingleTicket fetch error for #${ticketId}:`, err);
+            alert('Error: ' + err.message);
+        });
     };
 
     window.retryFailedTickets = function() {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
+        console.log(`[DASHBOARD] retryFailedTickets — user: ${currentUser.email}`);
         fetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({
@@ -3663,8 +3675,15 @@ document.addEventListener('DOMContentLoaded', () => {
             })
         })
         .then(res => res.json())
-        .then(data => { alert(data.message || 'Retry job started.'); pollAiBatchStatus(); })
-        .catch(err => { alert('Error: ' + err.message); });
+        .then(data => {
+            console.log('[DASHBOARD] retryFailedTickets response:', data);
+            alert(data.message || 'Retry job started.');
+            pollAiBatchStatus();
+        })
+        .catch(err => {
+            console.error(`[DASHBOARD] retryFailedTickets error:`, err);
+            alert('Error: ' + err.message);
+        });
     };
 
     // ── AI Queue Action Handlers ─────────────────────────────────────────────
@@ -3673,6 +3692,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentSubject = decodeURIComponent(atob(b64Subject));
             const currentIntegration = decodeURIComponent(atob(b64Int));
             const currentProduct = decodeURIComponent(atob(b64Prod));
+            console.log(`[DASHBOARD] openOverrideModal — ticket #${ticketId}, integration: "${currentIntegration}", product: "${currentProduct}"`);
 
             document.getElementById('override-ticket-id').value = ticketId;
             document.getElementById('override-subject').value = currentSubject;
@@ -3729,6 +3749,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusEl.className = 'text-xs font-medium mt-3 text-center text-amber-600';
         statusEl.textContent = 'Saving override...';
         btn.disabled = true;
+        console.log(`[DASHBOARD] saveManualOverride — ticket #${ticketId}, newIntegration: "${newIntegration}", newProduct: "${newProduct}", user: ${currentUser.email}`);
 
         fetch(SHEET_URL, {
             method: 'POST',
@@ -3744,6 +3765,7 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(res => res.json())
         .then(data => {
+            console.log(`[DASHBOARD] saveManualOverride response for #${ticketId}:`, data);
             btn.disabled = false;
             if (data.status === 'success') {
                 statusEl.className = 'text-xs font-medium mt-3 text-center text-green-600';
@@ -3758,6 +3780,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         })
         .catch(err => {
+            console.error(`[DASHBOARD] saveManualOverride fetch error for #${ticketId}:`, err);
             btn.disabled = false;
             statusEl.className = 'text-xs font-medium mt-3 text-center text-red-600';
             statusEl.textContent = '❌ Error: ' + err.message;
@@ -3767,6 +3790,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.skipAiTicket = function(ticketId) {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
         if (!confirm(`Are you sure you want to completely skip ticket #${ticketId}? It will be removed from the AI charts.`)) return;
+        console.log(`[DASHBOARD] skipAiTicket — ticket #${ticketId}, user: ${currentUser.email}`);
         
         fetch(SHEET_URL, {
             method: 'POST',
@@ -3779,17 +3803,22 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(res => res.json())
         .then(data => {
+            console.log(`[DASHBOARD] skipAiTicket response for #${ticketId}:`, data);
             if (data.status === 'success') {
                 window.fetchAiData(); // refresh table
             } else {
                 alert('Error skipping ticket: ' + data.message);
             }
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => {
+            console.error(`[DASHBOARD] skipAiTicket error for #${ticketId}:`, err);
+            alert('Error: ' + err.message);
+        });
     };
 
     window.dismissAiTicket = function(ticketId) {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
+        console.log(`[DASHBOARD] dismissAiTicket — ticket #${ticketId}, user: ${currentUser.email}`);
         
         // Optimistically hide the row for instant feedback
         fetch(SHEET_URL, {
@@ -3803,21 +3832,24 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(res => res.json())
         .then(data => {
+            console.log(`[DASHBOARD] dismissAiTicket response for #${ticketId}:`, data);
             if (data.status === 'success') {
                 window.fetchAiData(); // refresh table
             } else {
                 alert('Error dismissing ticket: ' + data.message);
             }
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => {
+            console.error(`[DASHBOARD] dismissAiTicket error for #${ticketId}:`, err);
+            alert('Error: ' + err.message);
+        });
     };
 
     window.reprocessAiTicket = function(ticketId) {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
         if (!confirm(`Are you sure you want to clear the AI data and re-run classification for ticket #${ticketId}?`)) return;
+        console.log(`[DASHBOARD] reprocessAiTicket — ticket #${ticketId}, user: ${currentUser.email}`);
         
-        // Show loading state directly in the row if possible, or just wait for fetchAiData to refresh.
-        // It's easier to just call the API and refresh.
         alert(`Reprocessing #${ticketId}. The system will now clear data and run the AI again. This takes ~15 seconds.`);
         
         fetch(SHEET_URL, {
@@ -3831,6 +3863,7 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(res => res.json())
         .then(data => {
+            console.log(`[DASHBOARD] reprocessAiTicket response for #${ticketId}:`, data);
             if (data.status === 'success') {
                 alert(`✅ Ticket #${ticketId} reprocessed successfully.`);
                 window.fetchAiData(); // refresh table
@@ -3838,7 +3871,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('Error reprocessing ticket: ' + data.message);
             }
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => {
+            console.error(`[DASHBOARD] reprocessAiTicket error for #${ticketId}:`, err);
+            alert('Error: ' + err.message);
+        });
     };
 
 }); // END DOMContentLoaded
