@@ -2795,97 +2795,185 @@ function revertNoiseTickets() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// FACTORY RESET: Clears all AI data sheets and removes AI tags/custom fields
-// from all tickets in Freshdesk (except ai:skipped).
+// FACTORY RESET — Resumable
+// Clears all AI data sheets and removes AI tags/custom fields from ALL
+// Freshdesk tickets (except ai:skipped / ai:skipped-noise).
+//
+// Because GAS has a 6-minute execution limit, this function saves its page
+// position to PropertiesService and schedules a continuation trigger
+// (factoryResetAiDataTrigger) to resume automatically.
+//
+// Run `factoryResetAiData()` once to kick it off.
+// Check Apps Script → Executions to monitor progress.
 // ─────────────────────────────────────────────────────────────────────────
 function factoryResetAiData() {
   var props = PropertiesService.getScriptProperties();
-  var apiKey = props.getProperty('Freshdesk_Api_Key');
-  var domain = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  
-  // 1. Clear Google Sheets Data
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var aiSheet = ss.getSheetByName('Ticket_AI_Data');
-  if (aiSheet && aiSheet.getLastRow() > 1) {
-    aiSheet.getRange(2, 1, aiSheet.getLastRow() - 1, aiSheet.getLastColumn()).clearContent();
-  }
-  
-  var logSheet = ss.getSheetByName('AI_Processing_Log');
-  if (logSheet && logSheet.getLastRow() > 1) {
-    logSheet.getRange(2, 1, logSheet.getLastRow() - 1, logSheet.getLastColumn()).clearContent();
-  }
-  
-  var auditSheet = ss.getSheetByName('Audit_Report');
-  if (auditSheet && auditSheet.getLastRow() > 1) {
-    auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, auditSheet.getLastColumn()).clearContent();
-  }
-  
-  Logger.log("Sheets cleared.");
 
-  // 2. Clear Freshdesk Tickets
-  var page = 1;
-  var ticketsReset = 0;
-  
+  // If a reset is already running, bail out so we don't double-start.
+  if (props.getProperty('FactoryReset_Running') === 'true') {
+    Logger.log('[FACTORY-RESET] Already running — aborting double-start. Check Executions for progress.');
+    return;
+  }
+
+  // ── First-run initialisation ────────────────────────────────────────────
+  props.setProperty('FactoryReset_Running',      'true');
+  props.setProperty('FactoryReset_Page',         '1');
+  props.setProperty('FactoryReset_TicketsReset', '0');
+  props.setProperty('FactoryReset_StartTime',    new Date().toISOString());
+
+  // 1. Clear Google Sheets (only on first call, not on resume)
+  var ss        = SpreadsheetApp.getActiveSpreadsheet();
+  var aiSheet   = ss.getSheetByName('Ticket_AI_Data');
+  var logSheet  = ss.getSheetByName('AI_Processing_Log');
+  var auditSheet= ss.getSheetByName('Audit_Report');
+
+  if (aiSheet    && aiSheet.getLastRow()    > 1) aiSheet.getRange(2, 1, aiSheet.getLastRow() - 1,    aiSheet.getLastColumn()).clearContent();
+  if (logSheet   && logSheet.getLastRow()   > 1) logSheet.getRange(2, 1, logSheet.getLastRow() - 1,   logSheet.getLastColumn()).clearContent();
+  if (auditSheet && auditSheet.getLastRow() > 1) auditSheet.getRange(2, 1, auditSheet.getLastRow() - 1, auditSheet.getLastColumn()).clearContent();
+  Logger.log('[FACTORY-RESET] Google Sheets cleared. Starting Freshdesk sweep...');
+
+  // Hand off to the core worker
+  factoryResetAiDataWorker_();
+}
+
+// ── Trigger entry-point (called by the auto-resume time trigger) ─────────
+function factoryResetAiDataTrigger() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('FactoryReset_Running') !== 'true') {
+    Logger.log('[FACTORY-RESET] Trigger fired but FactoryReset_Running is not true — exiting.');
+    cleanupFactoryResetTriggers_();
+    return;
+  }
+
+  // Prevent two trigger invocations from running simultaneously
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(2000);
+  } catch (e) {
+    Logger.log('[FACTORY-RESET] Could not acquire lock — another invocation is already running. Exiting.');
+    return;
+  }
+  try {
+    factoryResetAiDataWorker_();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ── Core worker — shared by first run and all resumes ────────────────────
+function factoryResetAiDataWorker_() {
+  var MAX_EXECUTION_TIME_MS = 4.5 * 60 * 1000; // 4m 30s — leave buffer before GAS kills us
+  var startTime  = new Date().getTime();
+
+  var props      = PropertiesService.getScriptProperties();
+  var apiKey     = props.getProperty('Freshdesk_Api_Key');
+  var domain     = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+
+  var page          = parseInt(props.getProperty('FactoryReset_Page')         || '1', 10);
+  var ticketsReset  = parseInt(props.getProperty('FactoryReset_TicketsReset') || '0', 10);
+
+  Logger.log('[FACTORY-RESET] Resuming from page ' + page + ' (' + ticketsReset + ' tickets reset so far).');
+
   while (true) {
-    // Use updated_since to fetch older tickets, sweeping the entire history
+    // ── Time guard ─────────────────────────────────────────────────────────
+    if (new Date().getTime() - startTime > MAX_EXECUTION_TIME_MS) {
+      // Save state and schedule a resume trigger
+      props.setProperty('FactoryReset_Page',         page.toString());
+      props.setProperty('FactoryReset_TicketsReset', ticketsReset.toString());
+
+      cleanupFactoryResetTriggers_(); // Remove any stale triggers first
+      try {
+        ScriptApp.newTrigger('factoryResetAiDataTrigger').timeBased().after(60 * 1000).create();
+        Logger.log('[FACTORY-RESET] Execution limit approaching. State saved at page ' + page + '. Resuming in ~60 seconds...');
+      } catch (e) {
+        Logger.log('[FACTORY-RESET] WARNING: Failed to create resume trigger: ' + e.message + '. Run factoryResetAiDataTrigger() manually to continue from page ' + page + '.');
+      }
+      return; // Exit gracefully — the trigger will call factoryResetAiDataTrigger()
+    }
+
+    // ── Fetch one page of tickets ──────────────────────────────────────────
     var url = 'https://' + domain + '/api/v2/tickets?per_page=100&updated_since=1970-01-01T00:00:00Z&order_by=created_at&order_type=desc&page=' + page;
     var res = UrlFetchApp.fetch(url, { headers: { Authorization: authHeader }, muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) break;
-    
+
+    if (res.getResponseCode() !== 200) {
+      Logger.log('[FACTORY-RESET] API error on page ' + page + ' (HTTP ' + res.getResponseCode() + '). Stopping.');
+      break;
+    }
+
     var tktsRes = JSON.parse(res.getContentText());
-    var tkts = Array.isArray(tktsRes) ? tktsRes : (tktsRes.results || []);
-    if (tkts.length === 0) break;
-    
+    var tkts    = Array.isArray(tktsRes) ? tktsRes : (tktsRes.results || []);
+
+    if (tkts.length === 0) {
+      Logger.log('[FACTORY-RESET] No more tickets — sweep complete!');
+      break; // Done — fall through to cleanup
+    }
+
+    // ── Process each ticket on this page ──────────────────────────────────
     for (var i = 0; i < tkts.length; i++) {
-      var t = tkts[i];
+      var t    = tkts[i];
       var tags = t.tags || [];
-      var newTags = [];
+      var newTags  = [];
       var hasAiTag = false;
-      
+
       for (var j = 0; j < tags.length; j++) {
+        // Preserve ai:skipped and ai:skipped-noise — those are intentional manual marks
         if (tags[j].indexOf('ai:') !== 0 || tags[j] === 'ai:skipped' || tags[j] === 'ai:skipped-noise') {
           newTags.push(tags[j]);
         } else {
-          hasAiTag = true; // Found an AI tag that needs removing
+          hasAiTag = true;
         }
       }
-      
+
       var cf = t.custom_fields || {};
       var hasCustomFields = !!(cf.cf_revised_subject_name || cf.cf_ai_proposed_subject || cf.cf_ai_summary_notes || cf.cf_ai_product_area || cf.cf_ai_integration || cf.cf_ai_severity);
 
-      // Skip PUT request if this ticket has no AI data to remove
-      if (!hasAiTag && !hasCustomFields) {
-        continue;
-      }
-      
+      // Skip the PUT call entirely if this ticket has nothing to clear
+      if (!hasAiTag && !hasCustomFields) continue;
+
       var updatePayload = {
         tags: newTags,
         custom_fields: {
           cf_revised_subject_name: null,
-          cf_ai_proposed_subject: null,
-          cf_ai_summary_notes: null,
-          cf_ai_product_area: null,
-          cf_ai_integration: null,
-          cf_ai_severity: null
+          cf_ai_proposed_subject:  null,
+          cf_ai_summary_notes:     null,
+          cf_ai_product_area:      null,
+          cf_ai_integration:       null,
+          cf_ai_severity:          null
         }
       };
-      
-      var updateUrl = 'https://' + domain + '/api/v2/tickets/' + t.id;
-      UrlFetchApp.fetch(updateUrl, {
-        'method': 'put',
-        'headers': { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-        'payload': JSON.stringify(updatePayload),
-        'muteHttpExceptions': true
+
+      UrlFetchApp.fetch('https://' + domain + '/api/v2/tickets/' + t.id, {
+        method:  'put',
+        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+        payload: JSON.stringify(updatePayload),
+        muteHttpExceptions: true
       });
       ticketsReset++;
     }
+
+    Logger.log('[FACTORY-RESET] Page ' + page + ' done. Total reset so far: ' + ticketsReset);
     page++;
-    Utilities.sleep(1500); // Respect API rate limits
+    props.setProperty('FactoryReset_Page',         page.toString());
+    props.setProperty('FactoryReset_TicketsReset', ticketsReset.toString());
+    Utilities.sleep(1500); // Respect Freshdesk API rate limits
   }
-  
-  Logger.log("Reset " + ticketsReset + " tickets in Freshdesk.");
+
+  // ── Fully complete ────────────────────────────────────────────────────────
+  Logger.log('[FACTORY-RESET] COMPLETE. Reset ' + ticketsReset + ' tickets in Freshdesk across ' + (page - 1) + ' pages.');
+  props.setProperty('FactoryReset_Running',      'false');
+  props.setProperty('FactoryReset_Page',         '1');
+  props.setProperty('FactoryReset_TicketsReset', '0');
+  cleanupFactoryResetTriggers_();
 }
 
-
-
+// ── Remove any pending factory-reset continuation triggers ────────────────
+function cleanupFactoryResetTriggers_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'factoryResetAiDataTrigger' &&
+        triggers[i].getEventType()       === ScriptApp.EventType.CLOCK) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+}
