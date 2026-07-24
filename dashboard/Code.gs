@@ -80,7 +80,7 @@ function getUserPermissions(email) {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
-var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 90847, 87300, 86863, 88551, 88552];
+var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 90847, 87300, 86863, 88551, 88552, 91175];
 
 var NOISE_SUBJECT_PHRASES = [
   'wеllsfаrgо оniinе',
@@ -817,7 +817,10 @@ function processTicket(ticketId, dryRun) {
     'procdergeschfitz1997@access.connectaccessonline.co',
     'sara.jacobs@techproviders.site',
     'postmaster@illinoisstateuniversity.onmicrosoft.com',
-    'postmaster@rbauction.onmicrosoft.com'
+    'postmaster@rbauction.onmicrosoft.com',
+    'astro@forwardfuture.ai',              // AI tool noise (ticket 90658)
+    'surveyresearch@ellucian.com',         // Ellucian survey noise (ticket 91404)
+    'reply-p7llnsqu4ooefdzgnda4uru5w4.70251@message.fedex.com'  // FedEx automated reply (ticket 90639)
   ];
   var EXCLUDED_SENDER_DOMAINS = [
     'melissa.com', 'melissadata.com',          // Melissa file notifications
@@ -879,7 +882,7 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 6. Hardcoded Tickets to Ignore and specific subject phrases
-  var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300, 86863, 88551, 88552];
+  var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300, 86863, 88551, 88552, 91175];
   if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
     isNoiseTicket = true;
   }
@@ -990,10 +993,12 @@ function processTicket(ticketId, dryRun) {
     ];
     
     if (aiResult.integration) {
-      // First strip out known stubborn hallucinations
+      // Normalize known variant names to canonical ERP names
       if (aiResult.integration.indexOf('Guild Core Engine') !== -1) {
         aiResult.integration = 'None';
       }
+      // Colleague SaaS is just Colleague — strip the SaaS suffix
+      aiResult.integration = aiResult.integration.replace(/Colleague SaaS/gi, 'Colleague');
       
       // Then validate it starts with an approved Base ERP
       var startsWithValidErp = false;

@@ -3713,28 +3713,24 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             document.getElementById('override-status').textContent = '';
-            
+
             const modal = document.getElementById('override-modal');
             if (modal) {
-                modal.classList.remove('invisible', 'opacity-0');
-                modal.classList.add('visible', 'opacity-100');
+                modal.style.display = 'flex';
+                console.log('[DASHBOARD] openOverrideModal — modal displayed successfully');
             } else {
-                console.error("override-modal element not found");
-                alert("Error: Modal could not be found.");
+                console.error('[DASHBOARD] openOverrideModal — override-modal element NOT FOUND in DOM');
+                alert('Error: Modal could not be found. Please refresh the page.');
             }
         } catch (e) {
-            console.error("Error opening override modal:", e);
-            alert("Error opening modal: " + e.message);
+            console.error('[DASHBOARD] openOverrideModal — unexpected error:', e);
+            alert('Error opening modal: ' + e.message);
         }
     };
 
     window.closeOverrideModal = function() {
         const modal = document.getElementById('override-modal');
-        modal.classList.remove('visible', 'opacity-100');
-        modal.classList.add('opacity-0');
-        setTimeout(() => {
-            modal.classList.add('invisible');
-        }, 300);
+        if (modal) modal.style.display = 'none';
     };
 
     window.saveManualOverride = function() {
