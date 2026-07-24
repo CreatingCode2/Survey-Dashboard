@@ -1,4 +1,4 @@
-// ==========================================================================
+﻿// ==========================================================================
 // FILE: Config.gs
 // ==========================================================================
 
@@ -2699,41 +2699,67 @@ function findTestableTicket() {
 // Run once from Apps Script editor after redeployment.
 // ─────────────────────────────────────────────────────────────────────────
 function removeNoiseTicketsFromSheet() {
-  var TICKETS_TO_REMOVE = ['90819', '90789', '90790', '90800', '90802', '90844', '90859', '90861', '91057', '90791', '90855', '90847', '90735', '90738', '90739', '90745', '90746', '90757', '90760', '90761', '90763', '90768', '90972'];
+  // Dynamically fetches all ai:skipped-noise tagged tickets from Freshdesk
+  // and removes their rows from Ticket_AI_Data and AI_Processing_Log.
+  // Run this any time you want to clean noise from your charts.
+  var props      = PropertiesService.getScriptProperties();
+  var apiKey     = props.getProperty('Freshdesk_Api_Key');
+  var domain     = 'runnertech.freshdesk.com';
+  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
+  var fdOpts     = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var noiseIds = [];
+  var page = 1;
+  Logger.log('[NOISE-CLEANUP] Fetching ai:skipped-noise tickets from Freshdesk...');
+
+  while (true) {
+    var searchUrl = 'https://' + domain + '/api/v2/search/tickets?query="tag:\'ai:skipped-noise\'"&page=' + page;
+    var res = UrlFetchApp.fetch(searchUrl, fdOpts);
+    if (res.getResponseCode() !== 200) {
+      Logger.log('[NOISE-CLEANUP] Search API error (HTTP ' + res.getResponseCode() + '): ' + res.getContentText());
+      break;
+    }
+    var body    = JSON.parse(res.getContentText());
+    var tickets = body.results || [];
+    if (tickets.length === 0) break;
+    for (var i = 0; i < tickets.length; i++) {
+      noiseIds.push(String(tickets[i].id));
+    }
+    if (page >= 10 || tickets.length < 30) break;
+    page++;
+    Utilities.sleep(500);
+  }
+
+  Logger.log('[NOISE-CLEANUP] Found ' + noiseIds.length + ' ai:skipped-noise tickets in Freshdesk.');
+  if (noiseIds.length === 0) { Logger.log('[NOISE-CLEANUP] Nothing to remove.'); return; }
+
+  var ss            = SpreadsheetApp.getActiveSpreadsheet();
   var removedAiData = 0;
   var removedLog    = 0;
 
-  // ── Clean Ticket_AI_Data ─────────────────────────────────────
   var aiSheet = ss.getSheetByName('Ticket_AI_Data');
-  if (aiSheet) {
+  if (aiSheet && aiSheet.getLastRow() > 1) {
     var aiData = aiSheet.getDataRange().getValues();
-    // Iterate from bottom up so row deletions don't shift indices
     for (var i = aiData.length - 1; i >= 1; i--) {
-      var tid = String(aiData[i][0]).trim();
-      if (TICKETS_TO_REMOVE.indexOf(tid) !== -1) {
-        aiSheet.deleteRow(i + 1); // sheet rows are 1-indexed
+      if (noiseIds.indexOf(String(aiData[i][0]).trim()) !== -1) {
+        aiSheet.deleteRow(i + 1);
         removedAiData++;
       }
     }
   }
 
-  // ── Clean AI_Processing_Log ──────────────────────────────────
   var logSheet = ss.getSheetByName('AI_Processing_Log');
-  if (logSheet) {
+  if (logSheet && logSheet.getLastRow() > 1) {
     var logData = logSheet.getDataRange().getValues();
     for (var j = logData.length - 1; j >= 1; j--) {
-      var ltid = String(logData[j][1]).trim(); // column B = ticket_id
-      if (TICKETS_TO_REMOVE.indexOf(ltid) !== -1) {
+      if (noiseIds.indexOf(String(logData[j][1]).trim()) !== -1) {
         logSheet.deleteRow(j + 1);
         removedLog++;
       }
     }
   }
 
-  var msg = 'Cleanup complete. Removed ' + removedAiData + ' rows from Ticket_AI_Data and ' + removedLog + ' rows from AI_Processing_Log.';
-  Logger.log(msg);
+  Logger.log('[NOISE-CLEANUP] COMPLETE. Removed ' + removedAiData + ' rows from Ticket_AI_Data and ' + removedLog + ' rows from AI_Processing_Log.');
 }
 function revertNoiseTickets() {
   var ticketsToRevert = [90819, 90789, 90790, 90800, 90802, 90844, 90859, 90861, 91057, 90791, 90855, 90847, 90735, 90738, 90739, 90745, 90746, 90757, 90760, 90761, 90763, 90768, 90972];
