@@ -158,7 +158,7 @@ function writeTicketAiData(ticket, aiResult) {
     ]);
   }
   
-  sheet.appendRow([
+  var newRow = [
     ticket.id,
     ticket.company_id || '',
     ticket.created_at,
@@ -175,7 +175,25 @@ function writeTicketAiData(ticket, aiResult) {
     aiResult.sentiment,
     ticket.status,
     aiResult.tags_to_add.join(', ')
-  ]);
+  ];
+
+  // ── Upsert: update existing row if ticket already processed, else append ──
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var idCol = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < idCol.length; i++) {
+      if (String(idCol[i][0]).trim() === String(ticket.id)) {
+        // Overwrite existing row in-place (row index is i+2 because data starts at row 2)
+        sheet.getRange(i + 2, 1, 1, newRow.length).setValues([newRow]);
+        Logger.log('[SHEET] Updated existing row for ticket #' + ticket.id + ' (row ' + (i + 2) + ')');
+        return;
+      }
+    }
+  }
+
+  // No existing row found — append as new
+  sheet.appendRow(newRow);
+  Logger.log('[SHEET] Appended new row for ticket #' + ticket.id);
 }
 
 function logAiProcessing(ticketId, status, actionOrError, dryRun, aiResult) {
