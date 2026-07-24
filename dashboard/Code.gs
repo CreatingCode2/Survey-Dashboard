@@ -1,4 +1,4 @@
-﻿// ==========================================================================
+// ==========================================================================
 // FILE: Config.gs
 // ==========================================================================
 
@@ -80,7 +80,7 @@ function getUserPermissions(email) {
 // ── Ticket types that should never be AI-processed (noise) ────
 var EXCLUDED_TICKET_TYPES = ['Spam', 'Runner Internal'];
 
-var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 90847, 87300, 86863, 88551, 88552, 91175];
+var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 90847, 87300, 86863, 88551, 88552, 91175, 90658, 91404, 90639];
 
 var NOISE_SUBJECT_PHRASES = [
   'wеllsfаrgо оniinе',
@@ -900,7 +900,7 @@ function processTicket(ticketId, dryRun) {
   }
   
   // 6. Hardcoded Tickets to Ignore and specific subject phrases
-  var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300, 86863, 88551, 88552, 91175];
+  var HARDCODED_IGNORED_TICKETS = [88131, 90745, 90746, 90757, 90760, 90761, 88778, 88997, 89395, 87300, 86863, 88551, 88552, 91175, 90658, 91404, 90639];
   if (HARDCODED_IGNORED_TICKETS.indexOf(Number(ticketId)) !== -1) {
     isNoiseTicket = true;
   }
@@ -2699,39 +2699,11 @@ function findTestableTicket() {
 // Run once from Apps Script editor after redeployment.
 // ─────────────────────────────────────────────────────────────────────────
 function removeNoiseTicketsFromSheet() {
-  // Dynamically fetches all ai:skipped-noise tagged tickets from Freshdesk
-  // and removes their rows from Ticket_AI_Data and AI_Processing_Log.
-  // Run this any time you want to clean noise from your charts.
-  var props      = PropertiesService.getScriptProperties();
-  var apiKey     = props.getProperty('Freshdesk_Api_Key');
-  var domain     = 'runnertech.freshdesk.com';
-  var authHeader = 'Basic ' + Utilities.base64Encode(apiKey + ':X');
-  var fdOpts     = { headers: { Authorization: authHeader }, muteHttpExceptions: true };
-
-  var noiseIds = [];
-  var page = 1;
-  Logger.log('[NOISE-CLEANUP] Fetching ai:skipped-noise tickets from Freshdesk...');
-
-  while (true) {
-    var searchUrl = 'https://' + domain + '/api/v2/search/tickets?query="tag:\'ai:skipped-noise\'"&page=' + page;
-    var res = UrlFetchApp.fetch(searchUrl, fdOpts);
-    if (res.getResponseCode() !== 200) {
-      Logger.log('[NOISE-CLEANUP] Search API error (HTTP ' + res.getResponseCode() + '): ' + res.getContentText());
-      break;
-    }
-    var body    = JSON.parse(res.getContentText());
-    var tickets = body.results || [];
-    if (tickets.length === 0) break;
-    for (var i = 0; i < tickets.length; i++) {
-      noiseIds.push(String(tickets[i].id));
-    }
-    if (page >= 10 || tickets.length < 30) break;
-    page++;
-    Utilities.sleep(500);
-  }
-
-  Logger.log('[NOISE-CLEANUP] Found ' + noiseIds.length + ' ai:skipped-noise tickets in Freshdesk.');
-  if (noiseIds.length === 0) { Logger.log('[NOISE-CLEANUP] Nothing to remove.'); return; }
+  // Removes rows from Ticket_AI_Data and AI_Processing_Log for any ticket
+  // in the master HARDCODED_IGNORED_TICKETS list. Run this after adding new
+  // ticket IDs to that list to instantly clean them from charts.
+  var idsToRemove = HARDCODED_IGNORED_TICKETS.map(function(id) { return String(id); });
+  Logger.log('[NOISE-CLEANUP] Purging ' + idsToRemove.length + ' known noise tickets from sheets...');
 
   var ss            = SpreadsheetApp.getActiveSpreadsheet();
   var removedAiData = 0;
@@ -2741,7 +2713,7 @@ function removeNoiseTicketsFromSheet() {
   if (aiSheet && aiSheet.getLastRow() > 1) {
     var aiData = aiSheet.getDataRange().getValues();
     for (var i = aiData.length - 1; i >= 1; i--) {
-      if (noiseIds.indexOf(String(aiData[i][0]).trim()) !== -1) {
+      if (idsToRemove.indexOf(String(aiData[i][0]).trim()) !== -1) {
         aiSheet.deleteRow(i + 1);
         removedAiData++;
       }
@@ -2752,7 +2724,7 @@ function removeNoiseTicketsFromSheet() {
   if (logSheet && logSheet.getLastRow() > 1) {
     var logData = logSheet.getDataRange().getValues();
     for (var j = logData.length - 1; j >= 1; j--) {
-      if (noiseIds.indexOf(String(logData[j][1]).trim()) !== -1) {
+      if (idsToRemove.indexOf(String(logData[j][1]).trim()) !== -1) {
         logSheet.deleteRow(j + 1);
         removedLog++;
       }
