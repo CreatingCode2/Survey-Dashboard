@@ -961,10 +961,18 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.classList.add('invisible', 'opacity-0');
         
         document.getElementById('login-step-1').classList.remove('hidden');
-        document.getElementById('login-step-2').classList.hidden = true;
+        document.getElementById('login-step-2').classList.add('hidden');
         document.getElementById('login-error').classList.add('hidden');
         document.getElementById('login-success').classList.add('hidden');
         document.getElementById('login-email-input').value = '';
+
+        window.goBackToStep1 = function() {
+            document.getElementById('login-step-2').classList.add('hidden');
+            document.getElementById('login-step-1').classList.remove('hidden');
+            document.getElementById('login-pin-input').value = '';
+            document.getElementById('login-error').classList.add('hidden');
+            document.getElementById('login-success').classList.add('hidden');
+        };
         document.getElementById('login-name-input').value = '';
         document.getElementById('login-pin-input').value = '';
     }
