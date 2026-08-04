@@ -2855,6 +2855,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'oracle database':  'Oracle Database',
             'oracle':           'Oracle Database', // Usually maps to DB unless it says EBS
             'advance':          'Advance',
+            'person manager':   'Banner',
             'salesforce':       'Salesforce',
             'dynamics':         'MS Dynamics',
             'ms dynamics':      'MS Dynamics',
@@ -3147,7 +3148,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.cachedSubCounts = {};
         
         data.forEach(r => {
-            const raw = (r.integration || '').trim();
+            let raw = (r.integration || '').trim();
+            if (/person manager/i.test(raw)) {
+                raw = raw.match(/colleague/i) ? 'Colleague - SaaS' : 'Banner - SaaS';
+            }
             const norm = normaliseIntegration(raw);
             if (!norm) return;
             

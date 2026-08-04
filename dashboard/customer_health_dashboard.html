@@ -1008,7 +1008,7 @@
     </div>
 
     <!-- Modal for Manual Override -->
-    <div id="override-modal" style="display:none; position:fixed; inset:0; background:rgba(17,24,39,0.75); align-items:center; justify-content:center; padding:1rem; z-index:50;" aria-modal="true" role="dialog">
+    <div id="override-modal" style="display:none; position:fixed; inset:0; background:rgba(17,24,39,0.75); align-items:center; justify-content:center; padding:1rem; z-index:9999;" aria-modal="true" role="dialog">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
             <div class="p-6 border-b border-gray-200">
                 <h3 class="text-xl font-bold text-amber-700">🛠️ Manual AI Override</h3>
@@ -1028,10 +1028,12 @@
                         <option value="Unknown">Unknown</option>
                         <option value="Banner - Self Service">Banner - Self Service</option>
                         <option value="Banner - Admin">Banner - Admin</option>
+                        <option value="Banner - SaaS">Banner - SaaS</option>
                         <option value="PeopleSoft - CS">PeopleSoft - CS</option>
                         <option value="PeopleSoft - HCM">PeopleSoft - HCM</option>
                         <option value="PeopleSoft - FIN">PeopleSoft - FIN</option>
                         <option value="Colleague">Colleague</option>
+                        <option value="Colleague - SaaS">Colleague - SaaS</option>
                         <option value="Advance">Advance</option>
                         <option value="Oracle EBS">Oracle EBS</option>
                         <option value="SurveyDIG">SurveyDIG</option>
@@ -1069,6 +1071,6 @@
         </div>
     </div>
 
-    <script src="customer_health_dashboard.js?v=5"></script>
+    <script src="customer_health_dashboard.js?v=6"></script>
 </body>
 </html>
