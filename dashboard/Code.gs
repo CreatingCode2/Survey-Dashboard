@@ -1044,7 +1044,7 @@ function processTicket(ticketId, dryRun) {
         cf_revised_subject_name: aiResult.proposed_subject,
         cf_ai_summary_notes: aiResult.summary
       },
-      tags: ticket.tags.concat((aiResult.tags_to_add || []).map(function(tag) { return String(tag).substring(0, 32); }))
+      tags: (ticket.tags || []).filter(function(t) { return t.indexOf('ai:') !== 0; }).concat((aiResult.tags_to_add || []).map(function(tag) { return String(tag).substring(0, 32); }))
     };
     
     var updateOptions = {
