@@ -1132,28 +1132,6 @@ function batchProcessTicketsTrigger() {
   }
 }
 
-function batchProcessTicketsTrigger() {
-  var props = PropertiesService.getScriptProperties();
-  var isRunning = props.getProperty('AI_Batch_Running');
-  if (isRunning !== 'true') return;
-
-  // CRITICAL: Prevent two trigger invocations from running simultaneously.
-  var lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(1000); // wait up to 1 second; if still locked, bail out
-  } catch (e) {
-    Logger.log('Another batch run is already in progress. Skipping this trigger invocation.');
-    return;
-  }
-
-  try {
-    var dryRun = props.getProperty('AI_Batch_DryRun') === 'true';
-    batchProcessTickets(dryRun);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
 function startBatchAiJob(dryRun, overwrite, triggeredBy, triggeredByEmail, limit, daysBack, startDate, endDate) {
   // CRITICAL: Clean up any old execution triggers from previous failed jobs before starting!
   cleanupBatchTriggers();
@@ -1172,9 +1150,10 @@ function startBatchAiJob(dryRun, overwrite, triggeredBy, triggeredByEmail, limit
   props.setProperty('AI_Batch_EndDate', endDate || '');
   props.setProperty('AI_Batch_TriggeredBy', triggeredBy || 'Unknown');
   props.setProperty('AI_Batch_TriggeredByEmail', triggeredByEmail || '');
-  props.setProperty('AI_Batch_StartTime', new Date().toISOString()); // NEW
+  props.setProperty('AI_Batch_StartTime', new Date().toISOString());
   props.setProperty('AI_Batch_LastRunEnd', '');    // Clear previous end time
   props.setProperty('AI_Batch_FinishedStatus', '');
+  props.setProperty('AI_Batch_Heartbeat', new Date().toISOString()); // Reset watchdog heartbeat
 
   // Try processing immediately
   batchProcessTickets(dryRun);
@@ -1199,7 +1178,8 @@ function setupDailyMaintenanceTrigger() {
 
 function runDailyMaintenanceBatch() {
   // Scan the last 30 days for newly closed/resolved tickets
-  startBatchAiJob(false, 'Daily Maintenance Trigger', 'system@runnertechnologies.com', 0, 30);
+  // Parameter order: dryRun, overwrite, triggeredBy, triggeredByEmail, limit, daysBack, startDate, endDate
+  startBatchAiJob(false, false, 'Daily Maintenance Trigger', 'system@runnertechnologies.com', 0, 30, null, null);
 }
 
 function stopBatchAiJob() {
