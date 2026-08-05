@@ -1421,6 +1421,8 @@ function batchProcessTickets(dryRun) {
         
         props.setProperty('AI_Batch_SkipCount', skippedCount.toString());
         props.setProperty('AI_Batch_FailCount', failedCount.toString());
+        // Update heartbeat on each processed ticket so watchdog stays satisfied
+        props.setProperty('AI_Batch_Heartbeat', new Date().toISOString());
         
         if (limit > 0 && processedCount >= limit) {
           props.setProperty('AI_Batch_Running', 'false');
@@ -1434,7 +1436,8 @@ function batchProcessTickets(dryRun) {
         Logger.log('Error processing ticket ' + ticketId + ': ' + e.message);
       }
       
-      // ~2s gap between tickets to stay within rate limits (reduced from 4s)
+      // Rate-limit sleep: only after calling processTicket() which hits Freshdesk + Groq APIs.
+      // In-memory skips above do NOT make API calls and do NOT need this sleep.
       Utilities.sleep(2000);
     }
     
