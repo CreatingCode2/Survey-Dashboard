@@ -1209,8 +1209,28 @@ function stopBatchAiJob() {
 
 function getBatchAiStatus() {
   var props = PropertiesService.getScriptProperties();
+  var isRunning = props.getProperty('AI_Batch_Running') === 'true';
+
+  // STALENESS WATCHDOG: If the batch says it is running but the heartbeat is
+  // older than 10 minutes, Google has hard-killed the GAS process without us
+  // being able to set Running=false.  Auto-correct the stuck flag here so the
+  // dashboard stops polling immediately.
+  if (isRunning) {
+    var heartbeat = props.getProperty('AI_Batch_Heartbeat');
+    if (heartbeat) {
+      var ageMs = new Date().getTime() - new Date(heartbeat).getTime();
+      var TEN_MINUTES_MS = 10 * 60 * 1000;
+      if (ageMs > TEN_MINUTES_MS) {
+        Logger.log('[WATCHDOG] Batch heartbeat is ' + Math.round(ageMs / 60000) + ' min old — auto-stopping stuck batch.');
+        props.setProperty('AI_Batch_Running', 'false');
+        props.setProperty('AI_Batch_FinishedStatus', 'watchdog_timeout');
+        isRunning = false;
+      }
+    }
+  }
+
   return {
-    running:          props.getProperty('AI_Batch_Running') === 'true',
+    running:          isRunning,
     page:             parseInt(props.getProperty('AI_Batch_Page') || '1', 10),
     ticketsProcessed: parseInt(props.getProperty('AI_Batch_Count') || '0', 10),
     failedCount:      parseInt(props.getProperty('AI_Batch_FailCount') || '0', 10),
@@ -1455,6 +1475,8 @@ function batchProcessTickets(dryRun) {
     props.setProperty('AI_Batch_Page',      page.toString());
     props.setProperty('AI_Batch_SkipCount', skippedCount.toString());
     props.setProperty('AI_Batch_FailCount', failedCount.toString());
+    // HEARTBEAT: Update timestamp so the staleness watchdog knows the batch is alive.
+    props.setProperty('AI_Batch_Heartbeat', new Date().toISOString());
   }
 
   // Record end time regardless of how we exited
