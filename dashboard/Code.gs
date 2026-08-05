@@ -1270,6 +1270,8 @@ function batchProcessTickets(dryRun) {
           ScriptApp.newTrigger('batchProcessTicketsTrigger').timeBased().after(60 * 1000).create();
         } catch (e) {
           Logger.log('Failed to create continuation trigger: ' + e.message);
+          props.setProperty('AI_Batch_Running', 'false');
+          jobFullyComplete = true;
         }
       }
       break;
