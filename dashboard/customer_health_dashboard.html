@@ -587,7 +587,13 @@
                 <!-- Ticket Browser: individual processed tickets -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200/80 p-4 mb-6">
                     <h2 class="text-lg font-semibold mb-1">Processed Ticket Browser</h2>
-                    <p class="text-sm text-gray-500 mb-4">Click any row to open the ticket in Freshdesk. Hover for AI summary.</p>
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <p class="text-sm text-gray-500">Click any row to open the ticket in Freshdesk. Hover for AI summary.</p>
+                        <div class="flex items-center gap-3">
+                            <span id="ticket-browser-count" class="text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1 rounded-full">Loading...</span>
+                            <span id="ticket-browser-total" class="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full hidden"></span>
+                        </div>
+                    </div>
                     <div class="overflow-x-auto max-h-96">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50 sticky top-0">

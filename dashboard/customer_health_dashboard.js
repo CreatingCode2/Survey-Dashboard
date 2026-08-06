@@ -3341,8 +3341,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 msg = `No tickets match the filter: <b>${window.aiTableFilter.value}</b>.<br><a href="#" onclick="window.aiTableFilter=null; window.renderTicketBrowser(window.cachedAiTickets); return false;" class="text-indigo-600 hover:underline mt-2 inline-block">Clear Filter</a>`;
             }
             container.innerHTML = `<tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">${msg}</td></tr>`;
+            // Update counter to show 0
+            const countEl = document.getElementById('ticket-browser-count');
+            if (countEl) countEl.textContent = '0 tickets';
+            const totalEl = document.getElementById('ticket-browser-total');
+            if (totalEl) totalEl.classList.add('hidden');
             return;
         }
+
+        // ── Update live ticket counters ──────────────────────────────────────
+        const totalProcessed = window.allAiTicketsData ? window.allAiTicketsData.length : filteredData.length;
+        const countEl = document.getElementById('ticket-browser-count');
+        const totalEl = document.getElementById('ticket-browser-total');
+        const isFiltered = window.aiTableFilter && window.aiTableFilter.value;
+        if (countEl) {
+            if (isFiltered) {
+                countEl.textContent = `Showing ${filteredData.length.toLocaleString()} filtered`;
+                countEl.className = 'text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 rounded-full';
+            } else {
+                countEl.textContent = `${totalProcessed.toLocaleString()} total processed`;
+                countEl.className = 'text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1 rounded-full';
+            }
+        }
+        if (totalEl) {
+            if (isFiltered) {
+                totalEl.textContent = `${totalProcessed.toLocaleString()} total in dataset`;
+                totalEl.classList.remove('hidden');
+            } else {
+                totalEl.classList.add('hidden');
+            }
+        }
+
 
         const SEVERITY_COLORS = {
             critical: 'bg-red-100 text-red-700',
