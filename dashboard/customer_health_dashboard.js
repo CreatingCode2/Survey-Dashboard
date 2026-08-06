@@ -3418,6 +3418,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+
         let html = '';
         flagged.forEach(r => {
             const fdUrl      = `https://runnertech.freshdesk.com/a/tickets/${r.ticket_id}`;
@@ -3430,13 +3431,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (severity.toLowerCase() === 'critical') flags.push('Critical Severity');
             if (resolution.toLowerCase() === 'pending') flags.push('Resolution Pending');
 
-                    let sevColor = severity === 'critical' ? 'text-red-700 font-bold' : 'text-gray-700';
+            let sevColor = severity === 'critical' ? 'text-red-700 font-bold' : 'text-gray-700';
 
-                    const b64Subject = btoa(encodeURIComponent(r.proposed_subject || ''));
-                    const b64Int = btoa(encodeURIComponent(r.integration || 'None'));
-                    const b64Prod = btoa(encodeURIComponent(r.product_area || 'Other'));
+            // PERMANENT FIX: Store values in data-* attributes so no special characters
+            // in subject/integration/product can ever break the onclick attribute.
+            // openOverrideModal reads from dataset, no b64 encoding needed at all.
+            const safeSubject     = (r.proposed_subject || '').replace(/"/g, '&quot;');
+            const safeIntegration = (r.integration || 'None').replace(/"/g, '&quot;');
+            const safeProduct     = (r.product_area || 'Other').replace(/"/g, '&quot;');
 
-                    html += `
+            html += `
                 <tr class="hover:bg-amber-50">
                     <td class="px-3 py-2 whitespace-nowrap font-medium text-indigo-600">
                         <a href="${fdUrl}" target="_blank" class="hover:underline">#${r.ticket_id}</a>
@@ -3447,7 +3451,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="px-3 py-2 whitespace-nowrap text-sm">${resolution}</td>
                     <td class="px-3 py-2 text-xs text-amber-700 font-medium">${flags.join(', ')}</td>
                     <td class="px-3 py-2 whitespace-nowrap text-center">
-                        <button type="button" onclick="openOverrideModal(${r.ticket_id}, '${b64Subject}', '${b64Int}', '${b64Prod}')" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Manually edit subject, integration, and product area">Edit</button>
+                        <button type="button"
+                            data-ticket-id="${r.ticket_id}"
+                            data-subject="${safeSubject}"
+                            data-integration="${safeIntegration}"
+                            data-product="${safeProduct}"
+                            onclick="openOverrideModal(this)"
+                            class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1"
+                            title="Manually edit subject, integration, and product area">Edit</button>
                         <button type="button" onclick="dismissAiTicket(${r.ticket_id})" class="px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-xs font-semibold mr-1" title="Accept this classification and clear it from the queue (keeps it in your charts)">Dismiss</button>
                         <button type="button" onclick="skipAiTicket(${r.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold mr-1" title="Remove from charts and mark as noise forever">Noise</button>
                         <button type="button" onclick="reprocessAiTicket(${r.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold" title="Re-run AI classification on this ticket">Re-run</button>
@@ -3457,6 +3468,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         container.innerHTML = html;
     };
+
+
 
     // ── Batch job controls ────────────────────────────────────────────────────
     window.toggleCustomDates = function() {
@@ -3699,29 +3712,31 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // ── AI Queue Action Handlers ─────────────────────────────────────────────
-    window.openOverrideModal = function(ticketId, b64Subject, b64Int, b64Prod) {
+    // PERMANENT FIX: accepts the button element (this) and reads data-* attributes.
+    // This avoids all special-character/b64-in-onclick-attribute bugs permanently.
+    window.openOverrideModal = function(btn) {
         try {
-            const currentSubject = decodeURIComponent(atob(b64Subject));
-            const currentIntegration = decodeURIComponent(atob(b64Int));
-            const currentProduct = decodeURIComponent(atob(b64Prod));
+            const ticketId          = btn.dataset.ticketId;
+            const currentSubject    = btn.dataset.subject     || '';
+            const currentIntegration= btn.dataset.integration || 'None';
+            const currentProduct    = btn.dataset.product     || 'Other';
+
             console.log(`[DASHBOARD] openOverrideModal — ticket #${ticketId}, integration: "${currentIntegration}", product: "${currentProduct}"`);
 
             document.getElementById('override-ticket-id').value = ticketId;
             document.getElementById('override-subject').value = currentSubject;
-            
+
             // Set dropdown values if they exist, otherwise fallback
             const intSelect = document.getElementById('override-integration');
-            if (Array.from(intSelect.options).some(o => o.value === currentIntegration)) {
-                intSelect.value = currentIntegration;
-            } else {
-                intSelect.value = 'Unknown';
+            if (intSelect) {
+                intSelect.value = Array.from(intSelect.options).some(o => o.value === currentIntegration)
+                    ? currentIntegration : 'Unknown';
             }
 
             const prodSelect = document.getElementById('override-product');
-            if (Array.from(prodSelect.options).some(o => o.value === currentProduct)) {
-                prodSelect.value = currentProduct;
-            } else {
-                prodSelect.value = 'Other';
+            if (prodSelect) {
+                prodSelect.value = Array.from(prodSelect.options).some(o => o.value === currentProduct)
+                    ? currentProduct : 'Other';
             }
 
             document.getElementById('override-status').textContent = '';
@@ -3739,6 +3754,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Error opening modal: ' + e.message);
         }
     };
+
 
     window.closeOverrideModal = function() {
         const modal = document.getElementById('override-modal');
