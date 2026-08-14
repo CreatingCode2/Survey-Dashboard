@@ -2843,33 +2843,57 @@ document.addEventListener('DOMContentLoaded', () => {
         if (EXCLUDE.includes(key)) return null;
 
         const MAP = {
-            'banner':           'Banner',
-            'peoplesoft':       'PeopleSoft',
-            'peoplesoft enterprise': 'PeopleSoft',
-            'ps campus solutions':   'PS Campus Solutions',
-            'colleague':        'Colleague',
-            'jd edwards':       'JD Edwards',
-            'jdedwards':        'JD Edwards',
-            'oracle ebs':       'Oracle EBS',
-            'oracle e-business suite': 'Oracle EBS',
-            'oracle database':  'Oracle Database',
-            'oracle':           'Oracle Database', // Usually maps to DB unless it says EBS
-            'advance':          'Advance',
-            'person manager':   'Banner',
-            'salesforce':       'Salesforce',
-            'dynamics':         'MS Dynamics',
-            'ms dynamics':      'MS Dynamics',
-            'workday':          'Workday',
-            'api':              'API',
-            'webhook':          'Webhook',
-            'clean_update':     'CLEAN_Update',
-            'clean_file':       'CLEAN_File',
-            'sso':              'SSO',
-            'ldap':             'LDAP',
-            'azure':            'Azure AD',
-            'saml':             'SAML',
+            'banner':                    'Banner',
+            'peoplesoft':                'PeopleSoft',
+            'peoplesoft enterprise':     'PeopleSoft',
+            // PERMANENT FIX: All Campus Solutions variants must roll up to PeopleSoft (top-level).
+            // Previously 'ps campus solutions' mapped to a SEPARATE 'PS Campus Solutions' slice.
+            // That caused two PeopleSoft entries in the chart. All variants now → 'PeopleSoft'.
+            'ps campus solutions':       'PeopleSoft',
+            'peoplesoft campus solutions': 'PeopleSoft',
+            'colleague':                 'Colleague',
+            'jd edwards':                'JD Edwards',
+            'jdedwards':                 'JD Edwards',
+            'oracle ebs':                'Oracle EBS',
+            'oracle e-business suite':   'Oracle EBS',
+            'oracle database':           'Oracle Database',
+            'oracle':                    'Oracle Database',
+            'advance':                   'Advance',
+            'person manager':            'Banner',
+            'salesforce':                'Salesforce',
+            'dynamics':                  'MS Dynamics',
+            'ms dynamics':               'MS Dynamics',
+            'workday':                   'Workday',
+            'api':                       'API',
+            'webhook':                   'Webhook',
+            'clean_update':              'CLEAN_Update',
+            'clean_file':                'CLEAN_File',
+            'sso':                       'SSO',
+            'ldap':                      'LDAP',
+            'azure':                     'Azure AD',
+            'saml':                      'SAML',
         };
         return MAP[key] || raw.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+
+    // Normalise PeopleSoft sub-module labels to canonical abbreviations.
+    // Called when building cachedSubCounts AND when filtering the ticket browser.
+    // This is the SINGLE source of truth for sub-label names — update here only.
+    function normalisePeopleSoftSub(raw) {
+        if (!raw) return 'Base / Core';
+        const key = raw.toLowerCase().trim();
+        // Campus Solutions variants
+        if (key === 'cs' || key === 'campus solutions' || key === 'campus solution' ||
+            key === 'ps campus solutions' || key === 'peoplesoft campus solutions') return 'CS';
+        // Human Capital Management
+        if (key === 'hcm' || key === 'human capital management' || key === 'human resources' ||
+            key === 'hr') return 'HCM';
+        // Finance
+        if (key === 'fin' || key === 'finance' || key === 'financials') return 'FIN';
+        // Self Service
+        if (key === 'self service' || key === 'ss' || key === 'selfservice') return 'Self Service';
+        // Return title-cased if no match
+        return raw.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     }
 
     // Normalise product_area slug → display name for Services/Products chart
@@ -3167,6 +3191,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (raw.includes('-')) {
                     let sub = raw.split('-').slice(1).join('-').trim();
                     if (!sub) sub = 'Base / Core';
+                    // PERMANENT FIX: Normalise sub-labels before storing so 'CS' and 'Campus Solutions'
+                    // don't appear as two separate slices in the drill-down chart.
+                    if (norm === 'PeopleSoft') sub = normalisePeopleSoftSub(sub);
                     window.cachedSubCounts[norm][sub] = (window.cachedSubCounts[norm][sub] || 0) + 1;
                 } else {
                     window.cachedSubCounts[norm]['Base / Core'] = (window.cachedSubCounts[norm]['Base / Core'] || 0) + 1;
@@ -3328,6 +3355,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             sub = raw.split('-').slice(1).join('-').trim();
                             if (!sub) sub = 'Base / Core';
                         }
+                        // PERMANENT FIX: Apply same normalisation used when building cachedSubCounts
+                        // so the comparison always matches the stored key.
+                        if (window.aiTableFilter.level === 'PeopleSoft') sub = normalisePeopleSoftSub(sub);
                         return sub === window.aiTableFilter.value;
                     }
                 }
