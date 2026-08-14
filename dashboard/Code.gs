@@ -742,11 +742,42 @@ function processTicket(ticketId, dryRun) {
   thread += "Subject: " + ticket.subject + "\n\n";
   thread += "Initial Description:\n" + (ticket.description_text || ticket.description) + "\n\n";
   
+  var hasManualSkip = false;
   for (var i = 0; i < conversations.length; i++) {
     var c = conversations[i];
     var type = c.incoming ? "Customer Reply" : (c.private ? "Internal Note" : "Agent Reply");
     thread += "--- " + type + " (" + c.created_at + ") ---\n";
-    thread += (c.body_text || c.body) + "\n\n";
+    var bodyText = c.body_text || c.body || "";
+    thread += bodyText + "\n\n";
+    
+    if (c.private && bodyText.toUpperCase().indexOf('[AI-SKIP]') !== -1) {
+      hasManualSkip = true;
+    }
+  }
+
+  if (hasManualSkip) {
+    var skipMsg = "Ticket manually skipped via [AI-SKIP] tag in internal note.";
+    Logger.log(skipMsg);
+    logAiProcessing(ticketId, "skipped", skipMsg, dryRun, null);
+    
+    if (!dryRun) {
+      try {
+        var existingTags = ticket.tags || [];
+        if (existingTags.indexOf('ai:skipped-noise') === -1) {
+          existingTags.push('ai:skipped-noise');
+          UrlFetchApp.fetch(ticketUrl, {
+            'method': 'put',
+            'headers': { 'Authorization': fdOpts.headers.Authorization, 'Content-Type': 'application/json' },
+            'payload': JSON.stringify({ tags: existingTags }),
+            'muteHttpExceptions': true
+          });
+        }
+      } catch (e) {
+        Logger.log("Failed to tag manual skip ticket " + ticketId + ": " + e.message);
+      }
+    }
+    
+    return { status: "skipped", message: skipMsg };
   }
   
   // Noise Filter Check
