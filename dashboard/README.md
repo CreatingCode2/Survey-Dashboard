@@ -43,7 +43,7 @@ Your Google Apps Script handles three primary operations:
    - **`sendpin`**: Generates a 6-digit PIN, stores it with a 10-minute expiry in `Login_Pins`, and emails it to the user.
    - **`verifypin`**: Validates the submitted PIN against the stored value; marks it used on success.
    - **Triage update** (default): Persists CSM assignments, status changes, and notes to `Triage_Data`, stamping the user's name, email, and timestamp. Also triggers CSM assignment email notifications.
-3. `syncFreshdesk()`: A time-driven trigger that calls the Freshdesk API daily to identify the last ticket date for each active company.
+4. `processTicket()`: The core AI evaluation loop. Detects noise based on rules, sender domains, and explicit directives (e.g., if an Internal Note contains the exact string `[AI-SKIP]`, the ticket is bypassed and tagged `ai:skipped-noise`).
 
 ## Known Limitations
 - Freshdesk ticket tracking requires exact company name matching between the Survey form, the Customer Master Data CSV, and Freshdesk records.

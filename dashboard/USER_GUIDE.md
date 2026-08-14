@@ -75,6 +75,7 @@ The Ticket Intelligence tab provides an AI-driven analysis of all support ticket
 *   **AI Controls (Admins Only):** Admins can view the AI Processing Log, manually process individual tickets, or trigger bulk AI processing.
 *   **Manual Overrides:** If the AI categorizes a ticket incorrectly, you can click the **Edit** button on any ticket to manually correct its Subject, Integration, or Product Area.
 *   **Dismiss vs. Noise:** Click **Dismiss** to accept a ticket's analysis and remove it from your queue (it stays in the metrics). Click **Noise** if the ticket was spam or irrelevant to completely exclude it from charts.
+*   **Force Skipping a Ticket:** To prevent the AI from processing a specific ticket entirely, an agent can leave an **Internal Note** in Freshdesk containing the exact text `[AI-SKIP]`. *Note: The square brackets must be included for the AI to recognize the command.*
 
 ---
 
