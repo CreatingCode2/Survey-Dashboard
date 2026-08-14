@@ -3472,13 +3472,39 @@ document.addEventListener('DOMContentLoaded', () => {
             return issueType === 'other' || severity === 'critical' || resolution === 'pending';
         });
 
-        if (flagged.length === 0) {
-            container.innerHTML = '<tr><td colspan="6" class="px-3 py-4 text-center text-green-600 font-medium text-sm">✅ No tickets flagged for review.</td></tr>';
+        const errorLogs = (window.allAiLogs || []).filter(log => log.status === 'error');
+
+        if (flagged.length === 0 && errorLogs.length === 0) {
+            container.innerHTML = '<tr><td colspan="7" class="px-3 py-4 text-center text-green-600 font-medium text-sm">✅ No tickets flagged for review and no failed batches.</td></tr>';
             return;
         }
 
 
         let html = '';
+        
+        // 1. Render failed batch tickets first (prominently in red)
+        errorLogs.forEach(err => {
+            const fdUrl = `https://runnertech.freshdesk.com/a/tickets/${err.ticket_id}`;
+            const safeSummary = (err.summary || 'Processing Failed').replace(/"/g, '&quot;');
+            html += `
+                <tr class="hover:bg-red-50 bg-red-50/50">
+                    <td class="px-3 py-2 whitespace-nowrap font-medium text-red-600">
+                        <a href="${fdUrl}" target="_blank" class="hover:underline">#${err.ticket_id}</a>
+                    </td>
+                    <td class="px-3 py-2 max-w-xs truncate text-sm text-red-800" title="${safeSummary}">${safeSummary}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm text-red-500">—</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm text-red-700 font-bold">Error</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm text-red-500">—</td>
+                    <td class="px-3 py-2 text-xs text-red-700 font-medium">Failed in Batch</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-center">
+                        <button type="button" onclick="reprocessAiTicket(${err.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold mr-1" title="Re-run AI classification on this ticket">Re-run</button>
+                        <button type="button" onclick="skipAiTicket(${err.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold" title="Remove from charts and mark as noise forever">Noise</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        // 2. Render flagged tickets
         flagged.forEach(r => {
             const fdUrl      = `https://runnertech.freshdesk.com/a/tickets/${r.ticket_id}`;
             const issueType  = (r.issue_type  || '—').trim();
