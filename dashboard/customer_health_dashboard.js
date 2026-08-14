@@ -3802,7 +3802,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const modal = document.getElementById('override-modal');
             if (modal) {
-                modal.style.display = 'flex';
+                modal.classList.remove('invisible', 'opacity-0');
+                modal.classList.add('visible', 'opacity-100');
                 console.log('[DASHBOARD] openOverrideModal — modal displayed successfully');
             } else {
                 console.error('[DASHBOARD] openOverrideModal — override-modal element NOT FOUND in DOM');
@@ -3817,7 +3818,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.closeOverrideModal = function() {
         const modal = document.getElementById('override-modal');
-        if (modal) modal.style.display = 'none';
+        if (modal) {
+            modal.classList.remove('visible', 'opacity-100');
+            modal.classList.add('invisible', 'opacity-0');
+        }
     };
 
     window.saveManualOverride = function() {
