@@ -1,6 +1,21 @@
 // --- CONFIGURATION: GOOGLE APPS SCRIPT WEB APP URL (global so all functions can access it) ---
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ1y8hdlqfU4FCGquP0--BmDzHemCOHnN4w2qEUZtmdyXwxz/exec';
-// -------------------------------------------------------
+
+// --- FIX FOR APPS SCRIPT "MULTIPLE ACCOUNTS" CORS 404 BUG ---
+// Google Apps Script Web Apps have a notoriously buggy redirect to script.googleusercontent.com
+// when a user is logged into multiple Google accounts in the same browser session.
+// Since the Web App is set to "Anyone", we can bypass this bug entirely by forcing the browser
+// to omit all cookies (credentials) during the fetch request, turning it into a truly anonymous request.
+const originalFetch = window.fetch;
+window.fetch = function() {
+    let args = Array.prototype.slice.call(arguments);
+    if (typeof args[0] === 'string' && (args[0].includes('script.google.com') || args[0].includes('script.googleusercontent.com'))) {
+        args[1] = args[1] || {};
+        args[1].credentials = 'omit';
+    }
+    return originalFetch.apply(window, args);
+};
+// ------------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', () => {
 
