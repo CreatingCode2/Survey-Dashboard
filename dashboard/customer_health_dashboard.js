@@ -3742,6 +3742,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5000);
     }
 
+    // ── Helper: build an action GET URL ─────────────────────────────────────
+    function actionUrl(action, extraParams) {
+        const params = new URLSearchParams({
+            type: 'action',
+            action: action,
+            triggeredBy: currentUser.name,
+            triggeredByEmail: currentUser.email,
+            ...extraParams
+        });
+        return `${SHEET_URL}?${params.toString()}`;
+    }
+
     window.processSingleTicket = function() {
         const input = document.getElementById('manual-ticket-id');
         if (!input || !input.value) { alert('Please enter a ticket ID.'); return; }
@@ -3751,16 +3763,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const forceReprocess = document.getElementById('manual-force-reprocess') && document.getElementById('manual-force-reprocess').checked;
         console.log(`[DASHBOARD] processSingleTicket — ticketId: ${ticketId}, forceReprocess: ${forceReprocess}, user: ${currentUser.email}`);
 
-        fetch(SHEET_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'process_single_ticket',
-                ticketId: ticketId,
-                forceReprocess: forceReprocess,
-                triggeredBy: currentUser.name,
-                triggeredByEmail: currentUser.email
-            })
-        })
+        fetch(actionUrl('process_ticket', { ticketId, forceReprocess }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] processSingleTicket response for #${ticketId}:`, data);
@@ -3785,14 +3788,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('opacity-50', 'cursor-not-allowed');
         }
 
-        fetch(SHEET_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'retry_failed_tickets',
-                triggeredBy: currentUser.name,
-                triggeredByEmail: currentUser.email
-            })
-        })
+        fetch(actionUrl('retry_failed_tickets', {}))
         .then(res => res.json())
         .then(data => {
             console.log('[DASHBOARD] retryFailedTickets response:', data);
@@ -3880,18 +3876,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         console.log(`[DASHBOARD] saveManualOverride — ticket #${ticketId}, newIntegration: "${newIntegration}", newProduct: "${newProduct}", user: ${currentUser.email}`);
 
-        fetch(SHEET_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'override_ai_classification',
-                ticketId: ticketId,
-                newSubject: newSubject,
-                newIntegration: newIntegration,
-                newProduct: newProduct,
-                triggeredBy: currentUser.name,
-                triggeredByEmail: currentUser.email
-            })
-        })
+        fetch(actionUrl('override_ai_classification', { ticketId, newSubject, newIntegration, newProduct }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] saveManualOverride response for #${ticketId}:`, data);
@@ -3921,15 +3906,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirm(`Are you sure you want to completely skip ticket #${ticketId}? It will be removed from the AI charts.`)) return;
         console.log(`[DASHBOARD] skipAiTicket — ticket #${ticketId}, user: ${currentUser.email}`);
         
-        fetch(SHEET_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'skip_ai_ticket',
-                ticketId: ticketId,
-                triggeredBy: currentUser.name,
-                triggeredByEmail: currentUser.email
-            })
-        })
+        fetch(actionUrl('skip_ai_ticket', { ticketId }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] skipAiTicket response for #${ticketId}:`, data);
@@ -3949,16 +3926,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
         console.log(`[DASHBOARD] dismissAiTicket — ticket #${ticketId}, user: ${currentUser.email}`);
         
-        // Optimistically hide the row for instant feedback
-        fetch(SHEET_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'dismiss_ai_ticket',
-                ticketId: ticketId,
-                triggeredBy: currentUser.name,
-                triggeredByEmail: currentUser.email
-            })
-        })
+        fetch(actionUrl('dismiss_ai_ticket', { ticketId }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] dismissAiTicket response for #${ticketId}:`, data);
@@ -3981,15 +3949,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         alert(`Reprocessing #${ticketId}. The system will now clear data and run the AI again. This takes ~15 seconds.`);
         
-        fetch(SHEET_URL, {
-            method: 'POST',
-            body: JSON.stringify({
-                action: 'reprocess_ai_ticket',
-                ticketId: ticketId,
-                triggeredBy: currentUser.name,
-                triggeredByEmail: currentUser.email
-            })
-        })
+        fetch(actionUrl('process_ticket', { ticketId, forceReprocess: true }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] reprocessAiTicket response for #${ticketId}:`, data);

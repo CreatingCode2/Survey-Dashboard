@@ -1943,6 +1943,74 @@ function doGet(e) {
       
       return ContentService.createTextOutput(JSON.stringify(response))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (e.parameter.type === 'action') {
+      // ----------------------------------------------------------------
+      // TYPE: action — GET-based proxy for all dashboard action buttons.
+      // Google Apps Script silently breaks browser POST fetch() requests
+      // due to its 302 redirect to script.googleusercontent.com (the browser
+      // drops the POST body on redirect per HTTP spec). All mutating actions
+      // are routed here as GET requests with URL parameters instead.
+      // ----------------------------------------------------------------
+      var act         = e.parameter.action || '';
+      var callerEmail = (e.parameter.triggeredByEmail || '').toLowerCase().trim();
+      var callerName  = e.parameter.triggeredBy || 'Unknown';
+
+      if (!isBatchAdmin(callerEmail)) {
+        return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Access denied.' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      if (act === 'retry_failed_tickets') {
+        var retryCount = retryFailedTicketsJob(callerName, callerEmail);
+        return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Queued ' + retryCount + ' failed ticket(s) for reprocessing.' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      if (act === 'process_ticket') {
+        var ticketId      = parseInt(e.parameter.ticketId, 10);
+        var forceReprocess = e.parameter.forceReprocess === 'true';
+        var props = PropertiesService.getScriptProperties();
+        props.setProperty('AI_Batch_TriggeredBy', callerName);
+        props.setProperty('AI_Batch_TriggeredByEmail', callerEmail);
+        var result = processTicketById(ticketId, false, forceReprocess);
+        return ContentService.createTextOutput(JSON.stringify({ status: result.status, message: result.message || result.status, ai_result: result.ai_result || null }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      if (act === 'dismiss_ai_ticket') {
+        var ticketId = parseInt(e.parameter.ticketId, 10);
+        var dimissRes = updateFreshdeskTicketFields(ticketId, { cf_ai_review_flag: false });
+        updateTicketAiDataRow(ticketId, { review_flag: 'false' });
+        return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Ticket dismissed.' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      if (act === 'skip_ai_ticket') {
+        var ticketId = parseInt(e.parameter.ticketId, 10);
+        var skipRes = updateFreshdeskTicketFields(ticketId, { cf_ai_noise: true, cf_ai_review_flag: false });
+        updateTicketAiDataRow(ticketId, { noise: 'true', review_flag: 'false' });
+        return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Ticket marked as noise.' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      if (act === 'override_ai_classification') {
+        var ticketId      = parseInt(e.parameter.ticketId, 10);
+        var newSubject    = e.parameter.newSubject    || '';
+        var newIntegration = e.parameter.newIntegration || '';
+        var newProduct    = e.parameter.newProduct    || '';
+        var customFields  = { cf_ai_proposed_subject: newSubject, cf_ai_integration: newIntegration, cf_ai_product_area: newProduct };
+        var overRes = updateFreshdeskTicketFields(ticketId, customFields);
+        if (overRes && overRes.status === 'success') {
+          updateTicketAiDataRow(ticketId, { proposed_subject: newSubject, integration: newIntegration, product_area: newProduct });
+          return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Override saved.' }))
+            .setMimeType(ContentService.MimeType.JSON);
+        }
+        return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Override failed.' }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Unknown action: ' + act }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
   }
 
