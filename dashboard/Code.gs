@@ -1105,7 +1105,8 @@ function processTicket(ticketId, dryRun) {
     var updateRes = UrlFetchApp.fetch(ticketUrl, updateOptions);
     
     // Auto-fix Freshdesk mandatory field validation errors on legacy/broken tickets
-    if (updateRes.getResponseCode() === 400 && updateRes.getContentText().indexOf('Validation failed') !== -1) {
+    var fdRetries = 3;
+    while (updateRes.getResponseCode() === 400 && updateRes.getContentText().indexOf('Validation failed') !== -1 && fdRetries > 0) {
       var errData = JSON.parse(updateRes.getContentText());
       var needsRetry = false;
       var errs = errData.errors || [];
@@ -1145,6 +1146,9 @@ function processTicket(ticketId, dryRun) {
       if (needsRetry) {
         updateOptions.payload = JSON.stringify(updatePayload);
         updateRes = UrlFetchApp.fetch(ticketUrl, updateOptions);
+        fdRetries--;
+      } else {
+        break; // Unhandled validation error, give up
       }
     }
 
