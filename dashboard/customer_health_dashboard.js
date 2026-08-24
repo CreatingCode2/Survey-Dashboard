@@ -3779,7 +3779,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({
-                action: 'retry_failed',
+                action: 'retry_failed_tickets',
                 triggeredBy: currentUser.name,
                 triggeredByEmail: currentUser.email
             })
