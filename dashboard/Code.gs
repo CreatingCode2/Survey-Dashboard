@@ -668,10 +668,25 @@ function callGroq(prompt) {
     if (code === 200) {
       var data = JSON.parse(text);
       if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
-        return JSON.parse(data.choices[0].message.content);
+        var rawContent = data.choices[0].message.content.trim();
+        // Strip markdown code blocks if the model ignored instructions
+        if (rawContent.indexOf('```json') === 0) {
+          rawContent = rawContent.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+        } else if (rawContent.indexOf('```') === 0) {
+          rawContent = rawContent.replace(/^```\n?/, '').replace(/\n?```$/, '');
+        }
+        return JSON.parse(rawContent);
       } else {
         throw new Error('Unexpected Groq response structure: ' + text);
       }
+    } else if (code === 400 && text.indexOf('json_validate_failed') !== -1 && attempt < maxRetries) {
+      Logger.log('Groq JSON validation failed. Retrying without strict response_format... (' + attempt + '/' + maxRetries + ')');
+      delete payload.response_format;
+      if (payload.messages[0].content.indexOf('CRITICAL:') === -1) {
+        payload.messages[0].content += "\n\nCRITICAL: You MUST output raw JSON without any markdown formatting (no ```json).";
+      }
+      options.payload = JSON.stringify(payload);
+      Utilities.sleep(2000);
     } else if ((code === 429 || code === 503) && attempt < maxRetries) {
       var retryDelaySec = 15; // default wait
       try {
@@ -1111,6 +1126,19 @@ function processTicket(ticketId, dryRun) {
         } else if (errs[e].field === 'custom_fields.cf_platform') {
           updatePayload.custom_fields.cf_platform = 'Other';
           needsRetry = true;
+        } else if (errs[e].field === 'responder_id') {
+          try {
+            var agentRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/agents?per_page=1', fdOpts);
+            if (agentRes.getResponseCode() === 200) {
+              var agents = JSON.parse(agentRes.getContentText());
+              if (agents && agents.length > 0) {
+                updatePayload.responder_id = agents[0].id;
+                needsRetry = true;
+              }
+            }
+          } catch (ex) {
+            Logger.log("Failed to fetch fallback agent for responder_id: " + ex.message);
+          }
         }
       }
       
