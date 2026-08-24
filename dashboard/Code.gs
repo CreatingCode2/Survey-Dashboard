@@ -1127,6 +1127,9 @@ function processTicket(ticketId, dryRun) {
         } else if (errs[e].field === 'custom_fields.cf_platform') {
           updatePayload.custom_fields.cf_platform = 'Other';
           needsRetry = true;
+        } else if (errs[e].field === 'custom_fields.cf_type_of_platform') {
+          updatePayload.custom_fields.cf_type_of_platform = 'Other';
+          needsRetry = true;
         } else if (errs[e].field === 'responder_id') {
           try {
             var agentRes = UrlFetchApp.fetch('https://' + domain + '/api/v2/agents?per_page=1', fdOpts);
