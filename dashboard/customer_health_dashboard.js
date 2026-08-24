@@ -3791,6 +3791,15 @@ document.addEventListener('DOMContentLoaded', () => {
     window.retryFailedTickets = function() {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
         console.log(`[DASHBOARD] retryFailedTickets — user: ${currentUser.email}`);
+        
+        const btn = document.getElementById('retry-failed-btn');
+        const originalText = btn ? btn.innerHTML : 'Retry Failed Tickets';
+        if (btn) {
+            btn.innerHTML = '⏳ Processing (this may take a minute)...';
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+
         fetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({
@@ -3808,6 +3817,13 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch(err => {
             console.error(`[DASHBOARD] retryFailedTickets error:`, err);
             alert('Error: ' + err.message);
+        })
+        .finally(() => {
+            if (btn) {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
         });
     };
 
