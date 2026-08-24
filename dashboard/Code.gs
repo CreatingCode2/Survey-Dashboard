@@ -638,7 +638,7 @@ function callGroq(prompt) {
 
   var url = 'https://api.groq.com/openai/v1/chat/completions';
   var payload = {
-    model: 'llama-3.1-8b-instant',
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
     messages: [
       {
         role: 'user',
