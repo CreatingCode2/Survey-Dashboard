@@ -1647,7 +1647,9 @@ function retryFailedTicketsJob(triggeredBy, triggeredByEmail) {
   for (var r = 1; r < data.length; r++) {
     var rowStatus   = String(data[r][3]).toLowerCase();
     var rowTicketId = String(data[r][1]).trim();
-    if (rowStatus === 'error' && rowTicketId && !seen[rowTicketId]) {
+    // Guard: skip malformed rows where ticket_id is not a valid positive integer
+    if (!rowTicketId || !/^\d+$/.test(rowTicketId)) continue;
+    if (rowStatus === 'error' && !seen[rowTicketId]) {
       seen[rowTicketId] = true;
       failedTicketIds.push(rowTicketId);
     }

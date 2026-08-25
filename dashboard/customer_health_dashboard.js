@@ -2968,9 +2968,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     for (let i = 1; i < logLines.length; i++) {
                         const parts = parseCSVLine(logLines[i]);
                         if (parts.length >= 4 && parts[0]) {
+                            const ticketIdRaw = (parts[1] || '').trim();
+                            // Skip malformed rows where ticket_id is not a valid integer (e.g. timestamps)
+                            if (!ticketIdRaw || !/^\d+$/.test(ticketIdRaw)) continue;
                             window.allAiLogs.push({
                                 timestamp:        parts[0],
-                                ticket_id:        parts[1],
+                                ticket_id:        ticketIdRaw,
                                 action:           parts[2],
                                 status:           parts[3],
                                 dry_run:          parts[5] || 'FALSE',
@@ -3491,7 +3494,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return issueType === 'other' || severity === 'critical' || resolution === 'pending';
         });
 
-        const errorLogs = (window.allAiLogs || []).filter(log => log.status === 'error');
+        // Filter error logs, skipping malformed rows where ticket_id is not a valid number
+        const errorLogs = (window.allAiLogs || []).filter(log => 
+            log.status === 'error' && log.ticket_id && /^\d+$/.test(String(log.ticket_id).trim())
+        );
 
         if (flagged.length === 0 && errorLogs.length === 0) {
             container.innerHTML = '<tr><td colspan="7" class="px-3 py-4 text-center text-green-600 font-medium text-sm">✅ No tickets flagged for review and no failed batches.</td></tr>';
