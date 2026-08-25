@@ -410,14 +410,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return finalRecord;
         }).filter(r => {
-            const isValid = r.company && r.company.trim().length > 0;
-            if (!isValid) {
-                rejectedCount++;
-                if (rejectedCount <= 5) {
-                    console.log(`Filtered out row ${r.id}: company="${r.company}"`);
-                }
+            // Fix: Do not drop rows missing a company name. Assign a fallback so they still appear in the Data Table.
+            if (!r.company || r.company.trim().length === 0) {
+                r.company = 'Unknown Company';
             }
-            return isValid;
+            return true;
         });
 
         console.log("processData output:", processed.length, "rows | Rejected:", rejectedCount);
@@ -3523,6 +3520,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="px-3 py-2 text-xs text-red-700 font-medium">Failed in Batch</td>
                     <td class="px-3 py-2 whitespace-nowrap text-center">
                         <button type="button" onclick="reprocessAiTicket(${err.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold mr-1" title="Re-run AI classification on this ticket">Re-run</button>
+                        <button type="button" class="editBtn px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-xs font-semibold mr-1" 
+                            title="Manually override AI classification"
+                            data-ticket="${err.ticket_id}" 
+                            data-subject="${safeSummary}" 
+                            data-integration="Unknown" 
+                            data-product="Other">Edit</button>
+                        <button type="button" onclick="dismissAiTicket(${err.ticket_id})" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Remove from queue (Data remains in chart)">Dismiss</button>
                         <button type="button" onclick="skipAiTicket(${err.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold" title="Remove from charts and mark as noise forever">Noise</button>
                     </td>
                 </tr>
