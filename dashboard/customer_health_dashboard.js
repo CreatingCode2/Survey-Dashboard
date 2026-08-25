@@ -2,6 +2,25 @@
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ1y8hdlqfU4FCGquP0--BmDzHemCOHnN4w2qEUZtmdyXwxz/exec';
 // -------------------------------------------------------
 
+// --- APPS SCRIPT CORS FIX ---
+// Google Apps Script does a 302 redirect from script.google.com → script.googleusercontent.com.
+// Browsers block this redirect and report a CORS error unless:
+//   1. redirect:'follow' is set (browser follows the redirect correctly)
+//   2. Content-Type:'text/plain' is used (avoids the OPTIONS preflight which GAS cannot handle)
+// This is the universally recommended fix from Stack Overflow / Google's own issue tracker.
+// See: https://stackoverflow.com/questions/37760695
+function apiFetch(url, options) {
+    const defaults = {
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+    };
+    // For GET requests (no body), only apply redirect:follow
+    const merged = Object.assign({}, defaults, options || {});
+    if (!merged.body) delete merged.headers;
+    return fetch(url, merged);
+}
+// ------------------------------------------------------------
+
 document.addEventListener('DOMContentLoaded', () => {
 
     // -------------------------------------------------------
@@ -549,7 +568,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Fetching from:", SHEET_URL);
 
         try {
-            const response = await fetch(SHEET_URL);
+            const response = await apiFetch(SHEET_URL);
 
             if (!response.ok) {
                 throw new Error(`HTTP Error: ${response.status}`);
@@ -588,7 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             console.log('\n📊 [DEBUG] Step 3: Fetching Freshdesk data...');
             try {
-                const fdResponse = await fetch(SHEET_URL + '?type=freshdesk');
+                const fdResponse = await apiFetch(SHEET_URL + '?type=freshdesk');
                 if (fdResponse.ok) {
                     const fdCsv = await fdResponse.text();
                     const fdLines = fdCsv.trim().split('\n');
@@ -604,7 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             console.log('\n📊 [DEBUG] Step 4: Fetching Triage Data...');
             try {
-                const trResponse = await fetch(SHEET_URL + '?type=triage');
+                const trResponse = await apiFetch(SHEET_URL + '?type=triage');
                 if (trResponse.ok) {
                     const trCsv = await trResponse.text();
                     const trLines = trCsv.trim().split('\n');
@@ -998,7 +1017,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             // Check permissions first
-            const permRes = await fetch(SHEET_URL + '?type=permissions&email=' + encodeURIComponent(emailInput));
+            const permRes = await apiFetch(SHEET_URL + '?type=permissions&email=' + encodeURIComponent(emailInput));
             const permData = await permRes.json();
             
             if (permData.permissions.role === 'viewer') {
@@ -1015,7 +1034,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             btn.textContent = 'Sending...';
             
-            const response = await fetch(SHEET_URL, {
+            const response = await apiFetch(SHEET_URL, {
                 method: 'POST',
                 body: JSON.stringify({ action: 'sendpin', email: emailInput, name: nameInput })
             });
@@ -1063,7 +1082,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
 
         try {
-            const response = await fetch(SHEET_URL, {
+            const response = await apiFetch(SHEET_URL, {
                 method: 'POST',
                 body: JSON.stringify({ action: 'verifypin', email: emailInput, pin: pinInput })
             });
@@ -1071,7 +1090,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (result.status === 'success') {
                 // Fetch final permissions
-                const permRes = await fetch(SHEET_URL + '?type=permissions&email=' + encodeURIComponent(emailInput));
+                const permRes = await apiFetch(SHEET_URL + '?type=permissions&email=' + encodeURIComponent(emailInput));
                 const permData = await permRes.json();
                 
                 currentUser = permData.permissions;
@@ -1200,7 +1219,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // If CSM is assigned in memory but was never explicitly saved to DB
             if (td.assignedCsm && td.assignedCsm !== 'Unassigned' && !td.dbCsmSynced) {
                 try {
-                    await fetch(SHEET_URL, {
+                    await apiFetch(SHEET_URL, {
                         method: 'POST',
                         body: JSON.stringify({
                             uniqueId: uid,
@@ -1424,7 +1443,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
 
         try {
-            const response = await fetch(SHEET_URL, {
+            const response = await apiFetch(SHEET_URL, {
                 method: 'POST',
                 body: JSON.stringify({
                     action: 'save_permissions',
@@ -1540,7 +1559,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            await fetch(SHEET_URL, {
+            await apiFetch(SHEET_URL, {
                 method: 'POST',
                 body: JSON.stringify({
                     uniqueId: uniqueId,
@@ -2667,7 +2686,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         btn.textContent = 'Sending Test...';
         
-        fetch(SHEET_URL, {
+        apiFetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company })
         })
@@ -2703,7 +2722,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         btn.textContent = 'Sending...';
         
-        fetch(SHEET_URL, {
+        apiFetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({ action: 'sendoutreach', email, name, subject, body, company, bcc: bccMe ? currentUser.email : '' })
         })
@@ -2792,7 +2811,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         btn.textContent = 'Saving...';
         
-        fetch(SHEET_URL, {
+        apiFetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({ action: 'addcontact', name, email, title, companyId })
         })
@@ -3612,7 +3631,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         console.log(`[DASHBOARD] startAiBatch — mode: ${modeLabel}, dryRun: ${dryRun}, overwrite: ${overwrite}, limit: ${limit}, daysBack: ${daysBack}, startDate: ${startDate}, endDate: ${endDate}, user: ${currentUser.email}`);
 
-        fetch(SHEET_URL, {
+        apiFetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({
                 action: 'start_batch_ai',
@@ -3638,7 +3657,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.stopAiBatch = function() {
         console.log('[DASHBOARD] stopAiBatch — sending stop signal to server.');
-        fetch(SHEET_URL, {
+        apiFetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({ action: 'stop_batch_ai' })
         }).catch(err => console.warn('[DASHBOARD] Stop batch signal failed (may have already finished):', err));
@@ -3676,7 +3695,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnAudit.disabled = true; 
         btnAudit.innerHTML = '⏳ Auditing...';
 
-        fetch(SHEET_URL, {
+        apiFetch(SHEET_URL, {
             method: 'POST',
             body: JSON.stringify({
                 action: 'run_batch_audit',
@@ -3763,7 +3782,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const forceReprocess = document.getElementById('manual-force-reprocess') && document.getElementById('manual-force-reprocess').checked;
         console.log(`[DASHBOARD] processSingleTicket — ticketId: ${ticketId}, forceReprocess: ${forceReprocess}, user: ${currentUser.email}`);
 
-        fetch(actionUrl('process_ticket', { ticketId, forceReprocess }))
+        apiFetch(actionUrl('process_ticket', { ticketId, forceReprocess }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] processSingleTicket response for #${ticketId}:`, data);
@@ -3788,7 +3807,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('opacity-50', 'cursor-not-allowed');
         }
 
-        fetch(actionUrl('retry_failed_tickets', {}))
+        apiFetch(actionUrl('retry_failed_tickets', {}))
         .then(res => res.json())
         .then(data => {
             console.log('[DASHBOARD] retryFailedTickets response:', data);
@@ -3888,7 +3907,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         console.log(`[DASHBOARD] saveManualOverride — ticket #${ticketId}, newIntegration: "${newIntegration}", newProduct: "${newProduct}", user: ${currentUser.email}`);
 
-        fetch(actionUrl('override_ai_classification', { ticketId, newSubject, newIntegration, newProduct }))
+        apiFetch(actionUrl('override_ai_classification', { ticketId, newSubject, newIntegration, newProduct }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] saveManualOverride response for #${ticketId}:`, data);
@@ -3918,7 +3937,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirm(`Are you sure you want to completely skip ticket #${ticketId}? It will be removed from the AI charts.`)) return;
         console.log(`[DASHBOARD] skipAiTicket — ticket #${ticketId}, user: ${currentUser.email}`);
         
-        fetch(actionUrl('skip_ai_ticket', { ticketId }))
+        apiFetch(actionUrl('skip_ai_ticket', { ticketId }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] skipAiTicket response for #${ticketId}:`, data);
@@ -3938,7 +3957,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isLoggedIn) { alert('You must be logged in.'); return; }
         console.log(`[DASHBOARD] dismissAiTicket — ticket #${ticketId}, user: ${currentUser.email}`);
         
-        fetch(actionUrl('dismiss_ai_ticket', { ticketId }))
+        apiFetch(actionUrl('dismiss_ai_ticket', { ticketId }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] dismissAiTicket response for #${ticketId}:`, data);
@@ -3961,7 +3980,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         alert(`Reprocessing #${ticketId}. The system will now clear data and run the AI again. This takes ~15 seconds.`);
         
-        fetch(actionUrl('process_ticket', { ticketId, forceReprocess: true }))
+        apiFetch(actionUrl('process_ticket', { ticketId, forceReprocess: true }))
         .then(res => res.json())
         .then(data => {
             console.log(`[DASHBOARD] reprocessAiTicket response for #${ticketId}:`, data);
