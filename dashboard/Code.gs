@@ -1086,13 +1086,29 @@ function processTicket(ticketId, dryRun) {
   
   // 5. Apply Updates to Freshdesk (if not dry run)
   if (!dryRun) {
+    // Pre-populate all known legacy required fields with safe defaults.
+    // When we PUT any update to an old/closed ticket, Freshdesk validates ALL
+    // required fields — including ones we never intend to change. Legacy tickets
+    // often have null or invalid values for these fields. By sending safe fallback
+    // values upfront we avoid the validation-loop retry cycle entirely.
     var updatePayload = {
       custom_fields: {
         cf_revised_subject_name: aiResult.proposed_subject,
-        cf_ai_summary_notes: aiResult.summary
+        cf_ai_summary_notes: aiResult.summary,
+        erp_integration: 'Other',
+        solutions: ticket.custom_fields && ticket.custom_fields.solutions || 'Other',
+        cf_platform: ticket.custom_fields && ticket.custom_fields.cf_platform || 'Other',
+        close_root_cause: ticket.custom_fields && ticket.custom_fields.close_root_cause || 'Not a ticket (Info or cc)',
+        cf_type_of_platform: ticket.custom_fields && ticket.custom_fields.cf_type_of_platform || null
       },
       tags: (ticket.tags || []).filter(function(t) { return t.indexOf('ai:') !== 0; }).concat((aiResult.tags_to_add || []).map(function(tag) { return String(tag).substring(0, 32); }))
     };
+    // Remove null/undefined custom fields so Freshdesk doesn't error on missing optional fields
+    Object.keys(updatePayload.custom_fields).forEach(function(k) {
+      if (updatePayload.custom_fields[k] === null || updatePayload.custom_fields[k] === undefined) {
+        delete updatePayload.custom_fields[k];
+      }
+    });
     
     var updateOptions = {
       method: 'put',
