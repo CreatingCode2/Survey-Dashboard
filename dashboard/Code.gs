@@ -1128,7 +1128,19 @@ function processTicket(ticketId, dryRun) {
           updatePayload.custom_fields.cf_platform = 'Other';
           needsRetry = true;
         } else if (errs[e].field === 'custom_fields.cf_type_of_platform') {
-          updatePayload.custom_fields.cf_type_of_platform = 'Other';
+          // Fetch the current ticket to copy the existing value (Freshdesk rejects 'Other' for this field)
+          try {
+            var curTicketRes = UrlFetchApp.fetch(ticketUrl.replace('/api/v2/tickets/', '/api/v2/tickets/').replace('?', ''), fdOpts);
+            if (curTicketRes.getResponseCode() === 200) {
+              var curTicket = JSON.parse(curTicketRes.getContentText());
+              var existingVal = curTicket.custom_fields && curTicket.custom_fields.cf_type_of_platform;
+              updatePayload.custom_fields.cf_type_of_platform = existingVal || 'N/A';
+            } else {
+              updatePayload.custom_fields.cf_type_of_platform = 'N/A';
+            }
+          } catch(ex) {
+            updatePayload.custom_fields.cf_type_of_platform = 'N/A';
+          }
           needsRetry = true;
         } else if (errs[e].field === 'responder_id') {
           try {
