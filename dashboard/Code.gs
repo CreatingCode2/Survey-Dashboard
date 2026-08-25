@@ -278,6 +278,18 @@ function deleteTicketAiDataRow(ticketId) {
   }
 }
 
+function deleteProcessingLogErrorRow(ticketId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('AI_Processing_Log');
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][1]).trim() === String(ticketId)) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+}
+
 function addTagToTicketAiDataRow(ticketId, tag) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Ticket_AI_Data');
@@ -2010,6 +2022,7 @@ function doGet(e) {
         var ticketId = parseInt(e.parameter.ticketId, 10);
         var dimissRes = updateFreshdeskTicketFields(ticketId, { cf_ai_review_flag: false });
         updateTicketAiDataRow(ticketId, { review_flag: 'false' });
+        deleteProcessingLogErrorRow(ticketId);
         return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Ticket dismissed.' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
@@ -2018,6 +2031,7 @@ function doGet(e) {
         var ticketId = parseInt(e.parameter.ticketId, 10);
         var skipRes = updateFreshdeskTicketFields(ticketId, { cf_ai_noise: true, cf_ai_review_flag: false });
         updateTicketAiDataRow(ticketId, { noise: 'true', review_flag: 'false' });
+        deleteProcessingLogErrorRow(ticketId);
         return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Ticket marked as noise.' }))
           .setMimeType(ContentService.MimeType.JSON);
       }
@@ -2031,6 +2045,7 @@ function doGet(e) {
         var overRes = updateFreshdeskTicketFields(ticketId, customFields);
         if (overRes && overRes.status === 'success') {
           updateTicketAiDataRow(ticketId, { proposed_subject: newSubject, integration: newIntegration, product_area: newProduct });
+          deleteProcessingLogErrorRow(ticketId);
           return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Override saved.' }))
             .setMimeType(ContentService.MimeType.JSON);
         }

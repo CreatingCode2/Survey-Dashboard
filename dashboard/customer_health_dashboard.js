@@ -3522,10 +3522,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button type="button" onclick="reprocessAiTicket(${err.ticket_id})" class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 text-xs font-semibold mr-1" title="Re-run AI classification on this ticket">Re-run</button>
                         <button type="button" class="editBtn px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 text-xs font-semibold mr-1" 
                             title="Manually override AI classification"
-                            data-ticket="${err.ticket_id}" 
+                            data-ticket-id="${err.ticket_id}" 
                             data-subject="${safeSummary}" 
                             data-integration="Unknown" 
-                            data-product="Other">Edit</button>
+                            data-product="Other"
+                            onclick="openOverrideModal(this)">Edit</button>
                         <button type="button" onclick="dismissAiTicket(${err.ticket_id})" class="px-2 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200 text-xs font-semibold mr-1" title="Remove from queue (Data remains in chart)">Dismiss</button>
                         <button type="button" onclick="skipAiTicket(${err.ticket_id})" class="px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 text-xs font-semibold" title="Remove from charts and mark as noise forever">Noise</button>
                     </td>
