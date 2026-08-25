@@ -1086,29 +1086,16 @@ function processTicket(ticketId, dryRun) {
   
   // 5. Apply Updates to Freshdesk (if not dry run)
   if (!dryRun) {
-    // Pre-populate all known legacy required fields with safe defaults.
-    // When we PUT any update to an old/closed ticket, Freshdesk validates ALL
-    // required fields — including ones we never intend to change. Legacy tickets
-    // often have null or invalid values for these fields. By sending safe fallback
-    // values upfront we avoid the validation-loop retry cycle entirely.
+    // Only include fields we are explicitly setting. Do NOT pre-populate required fields
+    // with guessed values — this breaks tickets that already have valid values stored.
+    // The auto-fix loop below handles the rare case where Freshdesk's existing value is invalid.
     var updatePayload = {
       custom_fields: {
         cf_revised_subject_name: aiResult.proposed_subject,
-        cf_ai_summary_notes: aiResult.summary,
-        erp_integration: 'Other',
-        solutions: ticket.custom_fields && ticket.custom_fields.solutions || 'Other',
-        cf_platform: ticket.custom_fields && ticket.custom_fields.cf_platform || 'Other',
-        close_root_cause: ticket.custom_fields && ticket.custom_fields.close_root_cause || 'Not a ticket (Info or cc)',
-        cf_type_of_platform: ticket.custom_fields && ticket.custom_fields.cf_type_of_platform || null
+        cf_ai_summary_notes: aiResult.summary
       },
       tags: (ticket.tags || []).filter(function(t) { return t.indexOf('ai:') !== 0; }).concat((aiResult.tags_to_add || []).map(function(tag) { return String(tag).substring(0, 32); }))
     };
-    // Remove null/undefined custom fields so Freshdesk doesn't error on missing optional fields
-    Object.keys(updatePayload.custom_fields).forEach(function(k) {
-      if (updatePayload.custom_fields[k] === null || updatePayload.custom_fields[k] === undefined) {
-        delete updatePayload.custom_fields[k];
-      }
-    });
     
     var updateOptions = {
       method: 'put',
@@ -1121,7 +1108,7 @@ function processTicket(ticketId, dryRun) {
     var updateRes = UrlFetchApp.fetch(ticketUrl, updateOptions);
     
     // Auto-fix Freshdesk mandatory field validation errors on legacy/broken tickets
-    var fdRetries = 3;
+    var fdRetries = 5;
     while (updateRes.getResponseCode() === 400 && updateRes.getContentText().indexOf('Validation failed') !== -1 && fdRetries > 0) {
       var errData = JSON.parse(updateRes.getContentText());
       var needsRetry = false;
@@ -1135,13 +1122,25 @@ function processTicket(ticketId, dryRun) {
           updatePayload.custom_fields.close_root_cause = 'Not a ticket (Info or cc)';
           needsRetry = true;
         } else if (errs[e].field === 'custom_fields.erp_integration') {
-          updatePayload.custom_fields.erp_integration = 'Other';
+          // Parse the allowed values from Freshdesk's own error message — this handles
+          // both CLEAN_Address ('...Other or N/A') and DES (NCOA, Phone Append, etc.)
+          // dynamically without hardcoding. Use the LAST allowed value as a safe fallback.
+          var allowedMsg = errs[e].message || '';
+          var allowedParts = allowedMsg.replace("It should be one of these values: ", '').split(',');
+          var fallback = allowedParts.length > 0
+            ? allowedParts[allowedParts.length - 1].trim().replace(/^'|'$/g, '')
+            : 'Other or N/A';
+          updatePayload.custom_fields.erp_integration = fallback;
           needsRetry = true;
         } else if (errs[e].field === 'type') {
           updatePayload.type = 'Incident';
           needsRetry = true;
         } else if (errs[e].field === 'custom_fields.cf_platform') {
           updatePayload.custom_fields.cf_platform = 'Other';
+          needsRetry = true;
+        } else if (errs[e].field === 'custom_fields.platform') {
+          // Freshdesk only accepts 'Unknown' for this legacy field
+          updatePayload.custom_fields.platform = 'Unknown';
           needsRetry = true;
         } else if (errs[e].field === 'custom_fields.cf_type_of_platform') {
           // Fetch the current ticket to copy the existing value (Freshdesk rejects 'Other' for this field)
