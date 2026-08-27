@@ -2855,7 +2855,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Exclude internal/partner systems and add-ons (these go to Product chart instead)
-        const EXCLUDE = ['general', 'none', 'melissa', 'ncoa', 'ftp', 'sftp', 'n/a', 'unknown', 'other'];
+        const EXCLUDE = ['general', 'none', 'melissa', 'ncoa', 'ftp', 'sftp', 'n/a', 'unknown', 'other', 'surveydig', 'cleandig', 'clean_address', 'cleanaddress'];
         if (EXCLUDE.includes(key)) return null;
 
         const MAP = {

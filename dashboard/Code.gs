@@ -1547,16 +1547,7 @@ function batchProcessTickets(dryRun) {
       Utilities.sleep(2000);
     }
     
-    // ── Page Exhaustion Safeguard ─────────────────────────────────────────────
-    // If every ticket on this page was outside the date window, we have gone
-    // past the relevant date range. Stop paginating — there is nothing left.
-    if (outOfBoundsCount > 0 && outOfBoundsCount === tkts.length) {
-      props.setProperty('AI_Batch_Running', 'false');
-      jobFullyComplete = true;
-      Logger.log('[BATCH-COMPLETE] Entire page of ' + tkts.length + ' tickets was outside the date window. Batch exhausted — stopping pagination.');
-    }
-
-    // If jobFullyComplete was set inside the inner loop (limit hit) or above (page exhaustion),
+    // If jobFullyComplete was set inside the inner loop (limit hit),
     // break out of the outer while immediately — do NOT advance to the next page.
     if (jobFullyComplete) break;
     
