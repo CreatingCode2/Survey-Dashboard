@@ -2582,7 +2582,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('outreach-modal');
         modal.classList.remove('invisible', 'opacity-0');
 
-        fetch(`${SHEET_URL}?type=contacts&companyName=${encodeURIComponent(companyName)}`)
+        apiFetch(`${SHEET_URL}?type=contacts&companyName=${encodeURIComponent(companyName)}`)
         .then(res => res.text())
         .then(rawText => {
             let data;
@@ -2945,7 +2945,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // ── 1. FETCH AI PROCESSING LOG ────────────────────────────────────────
         // Expected header: timestamp,ticket_id,action,status,error_message,dry_run,proposed_subject,summary
         try {
-            const logRes   = await fetch(`${SHEET_URL}?type=ai_log`);
+            const logRes   = await apiFetch(`${SHEET_URL}?type=ai_log`);
             const logCsv   = await logRes.text();
             const logLines = logCsv.trim().split('\n');
             const tbody    = document.getElementById('ai-log-table-body');
@@ -3040,7 +3040,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Expected header: ticket_id,company_id,created_at,processed_at,
         //   subject_original,proposed_subject,summary,issue_type,integration,product_area,...
         try {
-            const trendRes    = await fetch(`${SHEET_URL}?type=ticket_trends`);
+            const trendRes    = await apiFetch(`${SHEET_URL}?type=ticket_trends`);
             const trendCsv    = await trendRes.text();
             const trendLines  = trendCsv.trim().split('\n');
 
@@ -3733,7 +3733,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (aiPollingInterval) clearInterval(aiPollingInterval);
 
         aiPollingInterval = setInterval(() => {
-            fetch(`${SHEET_URL}?type=ai_status`)
+            apiFetch(`${SHEET_URL}?type=ai_status`)
             .then(res => res.json())
             .then(data => {
                 const statusText     = document.getElementById('ai-status-text');
