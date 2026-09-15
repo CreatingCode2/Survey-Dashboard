@@ -12,11 +12,15 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyq_MQYSZduVAftUiE9EQ
 function apiFetch(url, options) {
     const defaults = {
         redirect: 'follow',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        credentials: 'omit' // Bypass multiple-account CORS 404 bug
     };
     // For GET requests (no body), only apply redirect:follow
     const merged = Object.assign({}, defaults, options || {});
     if (!merged.body) delete merged.headers;
+    
+    // Ensure credentials omit is always passed to GAS endpoints
+    merged.credentials = 'omit';
     return fetch(url, merged);
 }
 // ------------------------------------------------------------
