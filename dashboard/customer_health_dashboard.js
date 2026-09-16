@@ -2857,7 +2857,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Exclude internal/partner systems, add-ons, and DES (these go to Product chart instead)
         const EXCLUDE = ['general', 'none', 'melissa', 'ncoa', 'ftp', 'sftp', 'n/a', 'unknown', 'other',
             'surveydig', 'cleandig', 'clean_address', 'cleanaddress',
-            'des', 'data enhancement services', 'data enhancement services (des)'];
+            'des', 'data enhancement services', 'data enhancement services (des)',
+            'phone append', 'email append', 'social append', 'social media append', 'mcoa',
+            'deceased append', 'pcoa', 'global address verification', 'geocoding', 'geobasic',
+            'geodata', 'geopoints', 'demographic data', 'rbdi', 'ccoa', 'text connector'];
         if (EXCLUDE.includes(key)) return null;
 
         const MAP = {
@@ -2874,6 +2877,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'jdedwards':                 'JD Edwards',
             'oracle ebs':                'Oracle EBS',
             'oracle e-business suite':   'Oracle EBS',
+            'oracle e business suite':   'Oracle EBS',
             'oracle database':           'Oracle Database',
             'oracle':                    'Oracle Database',
             'advance':                   'Advance',
@@ -3307,33 +3311,49 @@ document.addEventListener('DOMContentLoaded', () => {
             if (norm === 'Data Enhancement Services') {
                 // For DES: drill down by sub-service (from integration field like "DES - NCOA")
                 let raw = (r.integration || '').trim();
-                let sub = 'General DES';
+                let sub = '';
                 if (/^des\s*-\s*/i.test(raw)) {
                     sub = raw.replace(/^des\s*-\s*/i, '').trim();
                 } else {
-                    // Try to extract from issue_type (e.g. "NCOA File Upload" → "NCOA")
+                    // Try to extract from issue_type
                     const it = (r.issue_type || '').trim();
                     if (/ncoa/i.test(it)) sub = 'NCOA';
-                    else if (/mcoa/i.test(it)) sub = 'MCOA';
-                    else if (/pcoa/i.test(it)) sub = 'PCOA';
-                    else if (/ccoa/i.test(it)) sub = 'CCOA';
-                    else if (/geo\s*cod/i.test(it)) sub = 'GeoCoding';
-                    else if (/geo\s*data/i.test(it)) sub = 'GeoData';
-                    else if (/geo\s*point/i.test(it)) sub = 'GeoPoints';
-                    else if (/global\s*address/i.test(it)) sub = 'Global Address Verification';
                     else if (/phone\s*append/i.test(it)) sub = 'Phone Append';
                     else if (/email\s*append/i.test(it)) sub = 'Email Append';
+                    else if (/social/i.test(it)) sub = 'Social Append';
+                    else if (/mcoa/i.test(it)) sub = 'MCOA';
+                    else if (/deceased/i.test(it)) sub = 'Deceased Append';
+                    else if (/pcoa/i.test(it)) sub = 'PCOA';
+                    else if (/global\s*address/i.test(it)) sub = 'Global Address Verification';
+                    else if (/geo\s*cod/i.test(it)) sub = 'Geocoding';
+                    else if (/geo\s*basic/i.test(it)) sub = 'GeoBasic';
+                    else if (/geo\s*data/i.test(it)) sub = 'GeoData';
+                    else if (/geo\s*point/i.test(it)) sub = 'GeoPoints';
                     else if (/demographic/i.test(it)) sub = 'Demographic Data';
-                    else if (it) sub = it;
+                    else if (/rbdi/i.test(it)) sub = 'RBDI';
+                    else if (/ccoa/i.test(it)) sub = 'CCOA';
                 }
-                if (!sub) sub = 'General DES';
+                
+                if (!sub) sub = 'Other';
                 sub = sub.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim();
-                // Normalise common DES sub-service names
-                if (/ncoa/i.test(sub)) sub = 'NCOA';
+                
+                // Normalise variants
+                if (/social/i.test(sub)) sub = 'Social Append';
+                else if (/ncoa/i.test(sub)) sub = 'NCOA';
                 else if (/mcoa/i.test(sub)) sub = 'MCOA';
                 else if (/pcoa/i.test(sub)) sub = 'PCOA';
                 else if (/ccoa/i.test(sub)) sub = 'CCOA';
-                window.cachedProductSubCounts[norm][sub] = (window.cachedProductSubCounts[norm][sub] || 0) + 1;
+                else if (/geo\s*cod/i.test(sub)) sub = 'Geocoding';
+                else if (/geo\s*basic/i.test(sub)) sub = 'GeoBasic';
+                else if (/geo\s*data/i.test(sub)) sub = 'GeoData';
+                else if (/geo\s*point/i.test(sub)) sub = 'GeoPoints';
+                else if (/global\s*address/i.test(sub)) sub = 'Global Address Verification';
+                
+                const VALID_DES = ['NCOA', 'Phone Append', 'Email Append', 'Social Append', 'MCOA', 'Deceased Append', 'PCOA', 'Global Address Verification', 'Geocoding', 'GeoBasic', 'GeoData', 'GeoPoints', 'Demographic Data', 'RBDI', 'CCOA'];
+                
+                if (VALID_DES.includes(sub)) {
+                    window.cachedProductSubCounts[norm][sub] = (window.cachedProductSubCounts[norm][sub] || 0) + 1;
+                }
             } else {
                 // For all other products: drill down by ERP/integration
                 let raw = extractIntegrationWithFallback(r);
