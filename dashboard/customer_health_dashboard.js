@@ -2878,6 +2878,7 @@ document.addEventListener('DOMContentLoaded', () => {
             'oracle ebs':                'Oracle EBS',
             'oracle e-business suite':   'Oracle EBS',
             'oracle e business suite':   'Oracle EBS',
+            'oracle e':                  'Oracle EBS',
             'oracle database':           'Oracle Database',
             'oracle':                    'Oracle Database',
             'advance':                   'Advance',
@@ -3364,9 +3365,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (baseKey.includes('-')) baseKey = baseKey.split('-')[0].trim();
                     const ERP_MAP = {
                         'banner': 'Banner', 'peoplesoft': 'PeopleSoft', 'peoplesoft enterprise': 'PeopleSoft',
-                        'ps campus solutions': 'PeopleSoft', 'colleague': 'Colleague',
+                        'ps campus solutions': 'PeopleSoft', 'peoplesoft campus solutions': 'PeopleSoft',
+                        'colleague': 'Colleague',
                         'jd edwards': 'JD Edwards', 'jdedwards': 'JD Edwards',
                         'oracle ebs': 'Oracle EBS', 'oracle e-business suite': 'Oracle EBS',
+                        'oracle e business suite': 'Oracle EBS', 'oracle e': 'Oracle EBS',
                         'oracle database': 'Oracle Database', 'oracle': 'Oracle Database',
                         'advance': 'Advance', 'workday': 'Workday', 'salesforce': 'Salesforce',
                         'person manager': 'Banner'
