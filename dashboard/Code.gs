@@ -1090,6 +1090,21 @@ function processTicket(ticketId, dryRun) {
       }
     }
 
+    // 2b. Fallback: If integration is 'None' but proposed_subject contains
+    // a valid ERP in brackets like [Product - Oracle EBS], extract it.
+    if (aiResult.integration === 'None' && aiResult.proposed_subject) {
+      var bracketMatch = aiResult.proposed_subject.match(/^\[.*?\s*-\s*(.+?)\]/);
+      if (bracketMatch) {
+        var extracted = bracketMatch[1].trim();
+        for (var k = 0; k < VALID_BASE_ERPS.length; k++) {
+          if (extracted.indexOf(VALID_BASE_ERPS[k]) === 0 && VALID_BASE_ERPS[k] !== 'None') {
+            aiResult.integration = extracted;
+            break;
+          }
+        }
+      }
+    }
+
     // 3. Scrub Subject Line
     if (aiResult.proposed_subject) {
       aiResult.proposed_subject = aiResult.proposed_subject.replace(/ - Guild Core Engine/ig, '');

@@ -2848,18 +2848,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!raw || raw === '') return null;
 
         let key = raw.toLowerCase().trim();
-
-        if (key.startsWith('des -') || key === 'data enhancement services (des)' || key === 'data enhancement services' || key === 'des') {
-            return 'Data Enhancement Services (DES)';
-        }
         
         // If the AI outputs 'PeopleSoft - HCM', we want the base ERP for the top-level chart
         if (key.includes('-')) {
             key = key.split('-')[0].trim();
         }
 
-        // Exclude internal/partner systems and add-ons (these go to Product chart instead)
-        const EXCLUDE = ['general', 'none', 'melissa', 'ncoa', 'ftp', 'sftp', 'n/a', 'unknown', 'other', 'surveydig', 'cleandig', 'clean_address', 'cleanaddress'];
+        // Exclude internal/partner systems, add-ons, and DES (these go to Product chart instead)
+        const EXCLUDE = ['general', 'none', 'melissa', 'ncoa', 'ftp', 'sftp', 'n/a', 'unknown', 'other',
+            'surveydig', 'cleandig', 'clean_address', 'cleanaddress',
+            'des', 'data enhancement services', 'data enhancement services (des)'];
         if (EXCLUDE.includes(key)) return null;
 
         const MAP = {
@@ -2900,20 +2898,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Called when building cachedSubCounts AND when filtering the ticket browser.
     // This is the SINGLE source of truth for sub-label names — update here only.
     function normalisePeopleSoftSub(raw) {
-        if (!raw) return 'Base / Core';
+        if (!raw) return 'Admin';
         const key = raw.toLowerCase().trim();
         // Campus Solutions variants
-        if (key === 'cs' || key === 'campus solutions' || key === 'campus solution' ||
-            key === 'ps campus solutions' || key === 'peoplesoft campus solutions') return 'CS';
+        if (key === 'cs' || key.includes('campus solution')) return 'CS';
         // Human Capital Management
-        if (key === 'hcm' || key === 'human capital management' || key === 'human resources' ||
-            key === 'hr') return 'HCM';
+        if (key === 'hcm' || key.includes('human capital') || key === 'human resources' || key === 'hr') return 'HCM';
         // Finance
         if (key === 'fin' || key === 'finance' || key === 'financials') return 'FIN';
         // Self Service
         if (key === 'self service' || key === 'ss' || key === 'selfservice') return 'Self Service';
-        // Return title-cased if no match
-        return raw.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        // Everything else (None, Enterprise, Base / Core, unknown, etc.) → Admin
+        return 'Admin';
     }
 
     // Normalise product_area slug → display name for Services/Products chart
@@ -3189,38 +3185,39 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // ── Count ERP / Integrations & DES (Drill-down logic) ─────────────────
-        window.cachedErpIntgCounts = {};
-        window.cachedDesCounts = {};
-        window.cachedSubCounts = {};
-        
-        data.forEach(r => {
+        // ── Helper: extract ERP from integration field or proposed_subject fallback ──
+        function extractIntegrationWithFallback(r) {
             let raw = (r.integration || '').trim();
             if (/person manager/i.test(raw)) {
                 raw = raw.match(/colleague/i) ? 'Colleague - SaaS' : 'Banner - SaaS';
             }
+            // Client-side fallback: if integration is None/empty, try proposed_subject
+            if (!raw || raw.toLowerCase() === 'none' || raw.toLowerCase() === 'unknown') {
+                const match = (r.proposed_subject || '').match(/^\[.*?\s*-\s*(.+?)\]/);
+                if (match) raw = match[1].trim();
+            }
+            return raw;
+        }
+
+        // ── Count ERP / Integrations (Drill-down logic) ───────────────────────
+        window.cachedErpIntgCounts = {};
+        window.cachedSubCounts = {};
+        
+        data.forEach(r => {
+            let raw = extractIntegrationWithFallback(r);
             const norm = normaliseIntegration(raw);
             if (!norm) return;
             
             window.cachedErpIntgCounts[norm] = (window.cachedErpIntgCounts[norm] || 0) + 1;
             
-            if (norm === 'Data Enhancement Services (DES)') {
-                let sub = raw.replace(/^des\s*-\s*/i, '').trim();
-                if (!sub || sub.toLowerCase() === 'des') sub = 'Other DES';
-                sub = sub.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                window.cachedDesCounts[sub] = (window.cachedDesCounts[sub] || 0) + 1;
+            if (!window.cachedSubCounts[norm]) window.cachedSubCounts[norm] = {};
+            if (raw.includes('-')) {
+                let sub = raw.split('-').slice(1).join('-').trim();
+                if (!sub) sub = 'Base / Core';
+                if (norm === 'PeopleSoft') sub = normalisePeopleSoftSub(sub);
+                window.cachedSubCounts[norm][sub] = (window.cachedSubCounts[norm][sub] || 0) + 1;
             } else {
-                if (!window.cachedSubCounts[norm]) window.cachedSubCounts[norm] = {};
-                if (raw.includes('-')) {
-                    let sub = raw.split('-').slice(1).join('-').trim();
-                    if (!sub) sub = 'Base / Core';
-                    // PERMANENT FIX: Normalise sub-labels before storing so 'CS' and 'Campus Solutions'
-                    // don't appear as two separate slices in the drill-down chart.
-                    if (norm === 'PeopleSoft') sub = normalisePeopleSoftSub(sub);
-                    window.cachedSubCounts[norm][sub] = (window.cachedSubCounts[norm][sub] || 0) + 1;
-                } else {
-                    window.cachedSubCounts[norm]['Base / Core'] = (window.cachedSubCounts[norm]['Base / Core'] || 0) + 1;
-                }
+                window.cachedSubCounts[norm]['Base / Core'] = (window.cachedSubCounts[norm]['Base / Core'] || 0) + 1;
             }
         });
 
@@ -3233,7 +3230,6 @@ document.addEventListener('DOMContentLoaded', () => {
             
             let dataMap = {};
             if (level === 'top') dataMap = window.cachedErpIntgCounts;
-            else if (level === 'des') dataMap = window.cachedDesCounts;
             else dataMap = window.cachedSubCounts[level] || {};
             
             const sortedIntg = Object.entries(dataMap).sort((a,b) => b[1] - a[1]);
@@ -3270,10 +3266,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const idx = elements[0].index;
                             const label = chart.data.labels[idx];
                             if (level === 'top') {
-                                if (label === 'Data Enhancement Services (DES)') {
-                                    window.renderIntegrationChart('des');
-                                } else if (window.cachedSubCounts[label] && Object.keys(window.cachedSubCounts[label]).length > 0) {
-                                    // Drill down into ERP modules
+                                if (window.cachedSubCounts[label] && Object.keys(window.cachedSubCounts[label]).length > 0) {
                                     window.renderIntegrationChart(label);
                                 } else {
                                     if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'integration') {
@@ -3299,51 +3292,144 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.renderIntegrationChart('top');
 
-        // ── Count Services / Products ─────────────────────────────────────────
-        const prodCounts = {};
+        // ── Count Services / Products with drill-down sub-counts ──────────────
+        window.cachedProductCounts = {};
+        window.cachedProductSubCounts = {};
+        
         data.forEach(r => {
             const norm = normaliseProduct(r.product_area);
             if (!norm) return;
-            prodCounts[norm] = (prodCounts[norm] || 0) + 1;
+            window.cachedProductCounts[norm] = (window.cachedProductCounts[norm] || 0) + 1;
+            
+            // Build sub-counts for drill-down
+            if (!window.cachedProductSubCounts[norm]) window.cachedProductSubCounts[norm] = {};
+            
+            if (norm === 'Data Enhancement Services') {
+                // For DES: drill down by sub-service (from integration field like "DES - NCOA")
+                let raw = (r.integration || '').trim();
+                let sub = 'General DES';
+                if (/^des\s*-\s*/i.test(raw)) {
+                    sub = raw.replace(/^des\s*-\s*/i, '').trim();
+                } else {
+                    // Try to extract from issue_type (e.g. "NCOA File Upload" → "NCOA")
+                    const it = (r.issue_type || '').trim();
+                    if (/ncoa/i.test(it)) sub = 'NCOA';
+                    else if (/mcoa/i.test(it)) sub = 'MCOA';
+                    else if (/pcoa/i.test(it)) sub = 'PCOA';
+                    else if (/ccoa/i.test(it)) sub = 'CCOA';
+                    else if (/geo\s*cod/i.test(it)) sub = 'GeoCoding';
+                    else if (/geo\s*data/i.test(it)) sub = 'GeoData';
+                    else if (/geo\s*point/i.test(it)) sub = 'GeoPoints';
+                    else if (/global\s*address/i.test(it)) sub = 'Global Address Verification';
+                    else if (/phone\s*append/i.test(it)) sub = 'Phone Append';
+                    else if (/email\s*append/i.test(it)) sub = 'Email Append';
+                    else if (/demographic/i.test(it)) sub = 'Demographic Data';
+                    else if (it) sub = it;
+                }
+                if (!sub) sub = 'General DES';
+                sub = sub.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ').trim();
+                // Normalise common DES sub-service names
+                if (/ncoa/i.test(sub)) sub = 'NCOA';
+                else if (/mcoa/i.test(sub)) sub = 'MCOA';
+                else if (/pcoa/i.test(sub)) sub = 'PCOA';
+                else if (/ccoa/i.test(sub)) sub = 'CCOA';
+                window.cachedProductSubCounts[norm][sub] = (window.cachedProductSubCounts[norm][sub] || 0) + 1;
+            } else {
+                // For all other products: drill down by ERP/integration
+                let raw = extractIntegrationWithFallback(r);
+                let sub = 'Standalone';
+                if (raw && raw.toLowerCase() !== 'none' && raw.toLowerCase() !== 'unknown') {
+                    // Get base ERP name
+                    let baseKey = raw.toLowerCase().trim();
+                    if (baseKey.includes('-')) baseKey = baseKey.split('-')[0].trim();
+                    const ERP_MAP = {
+                        'banner': 'Banner', 'peoplesoft': 'PeopleSoft', 'peoplesoft enterprise': 'PeopleSoft',
+                        'ps campus solutions': 'PeopleSoft', 'colleague': 'Colleague',
+                        'jd edwards': 'JD Edwards', 'jdedwards': 'JD Edwards',
+                        'oracle ebs': 'Oracle EBS', 'oracle e-business suite': 'Oracle EBS',
+                        'oracle database': 'Oracle Database', 'oracle': 'Oracle Database',
+                        'advance': 'Advance', 'workday': 'Workday', 'salesforce': 'Salesforce',
+                        'person manager': 'Banner'
+                    };
+                    sub = ERP_MAP[baseKey] || raw.split('-')[0].trim();
+                }
+                window.cachedProductSubCounts[norm][sub] = (window.cachedProductSubCounts[norm][sub] || 0) + 1;
+            }
         });
-        const sortedProd = Object.entries(prodCounts).sort((a,b) => b[1] - a[1]).slice(0, 50);
 
-        const prodCtx = document.getElementById('aiProductChart');
-        if (prodCtx) {
+        window.renderProductChart = function(level = 'top') {
+            if (aiProductChartInstance) { aiProductChartInstance.destroy(); aiProductChartInstance = null; }
+            
+            const prodCtx = document.getElementById('aiProductChart');
+            const backBtn = document.getElementById('ai-product-back-btn');
+            if (!prodCtx) return;
+            
+            let dataMap = {};
+            if (level === 'top') dataMap = window.cachedProductCounts;
+            else dataMap = window.cachedProductSubCounts[level] || {};
+            
+            const sortedProd = Object.entries(dataMap).sort((a,b) => b[1] - a[1]);
+            
+            if (backBtn) {
+                backBtn.classList.toggle('hidden', level === 'top');
+            }
+
+            if (sortedProd.length === 0) {
+                const ctx = prodCtx.getContext('2d');
+                ctx.clearRect(0, 0, prodCtx.width, prodCtx.height);
+                ctx.font = '13px Inter, sans-serif';
+                ctx.fillStyle = '#9ca3af';
+                ctx.textAlign = 'center';
+                ctx.fillText(level === 'top' ? 'No product data yet.' : 'No sub-category data available.', prodCtx.width / 2, prodCtx.height / 2);
+                return;
+            }
+
             aiProductChartInstance = new Chart(prodCtx.getContext('2d'), {
-                type: 'bar',
+                type: 'doughnut',
                 data: {
                     labels: sortedProd.map(i => i[0]),
                     datasets: [{
-                        label: 'Tickets',
                         data: sortedProd.map(i => i[1]),
-                        backgroundColor: sortedProd.map((_, i) => PALETTE[i % PALETTE.length]),
-                        borderRadius: 4
+                        backgroundColor: window.CHART_PALETTE.slice(0, sortedProd.length)
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        x: { ticks: { maxRotation: 35, minRotation: 20, font: { size: 11 } } },
-                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
-                    },
+                    plugins: { legend: { position: 'right', labels: { font: { size: 12 } } } },
                     onClick: (event, elements, chart) => {
                         if (elements.length > 0) {
                             const idx = elements[0].index;
                             const label = chart.data.labels[idx];
-                            if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'product_area') {
-                                window.aiTableFilter = null; // Toggle off
+                            if (level === 'top') {
+                                if (window.cachedProductSubCounts[label] && Object.keys(window.cachedProductSubCounts[label]).length > 0) {
+                                    // Drill down into product sub-categories
+                                    window.renderProductChart(label);
+                                } else {
+                                    // No sub-data, just filter the ticket browser
+                                    if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'product_area') {
+                                        window.aiTableFilter = null;
+                                    } else {
+                                        window.aiTableFilter = { column: 'product_area', value: label };
+                                    }
+                                    window.renderTicketBrowser(window.cachedAiTickets);
+                                }
                             } else {
-                                window.aiTableFilter = { column: 'product_area', value: label };
+                                // Sub-level: filter ticket browser by product + sub
+                                if (window.aiTableFilter && window.aiTableFilter.value === label && window.aiTableFilter.column === 'product_area') {
+                                    window.aiTableFilter = null;
+                                } else {
+                                    window.aiTableFilter = { column: 'product_area', value: level, subFilter: label };
+                                }
+                                window.renderTicketBrowser(window.cachedAiTickets);
                             }
-                            window.renderTicketBrowser(window.cachedAiTickets);
                         }
                     }
                 }
             });
-        }
+        };
+
+        window.renderProductChart('top');
     };
 
     // ── Render the ticket browser table ───────────────────────────────────────
@@ -3492,7 +3578,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (tags.includes('ai:reviewed')) return false; // hide dismissed tickets
             
-            return issueType === 'other' || severity === 'critical' || resolution === 'pending';
+            const productArea = (r.product_area || '').toLowerCase().trim();
+            return issueType === 'other' || productArea === 'other' || severity === 'critical' || resolution === 'pending';
         });
 
         // Filter error logs, skipping malformed rows where ticket_id is not a valid number

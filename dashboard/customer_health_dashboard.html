@@ -575,9 +575,14 @@
                             <canvas id="aiIntegrationChart"></canvas>
                         </div>
                     </div>
-                    <div class="chart-card">
-                        <h2 class="text-lg font-semibold mb-1">Products \ Services</h2>
-                        <p class="text-sm text-gray-500 mb-4">Add-ons like SFTP and Data Enhancement</p>
+                    <div class="chart-card relative">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-lg font-semibold mb-1">Products \ Services</h2>
+                            <button id="ai-product-back-btn" class="hidden text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center" onclick="window.renderProductChart('top')">
+                                &larr; Back
+                            </button>
+                        </div>
+                        <p class="text-sm text-gray-500 mb-4">Runner products and services</p>
                         <div class="chart-container flex-grow" style="height: 300px;">
                             <canvas id="aiProductChart"></canvas>
                         </div>
