@@ -85,6 +85,13 @@
 - **Permanent fix:** The `apiFetch` wrapper (and any `fetch` to Apps Script) MUST include `credentials: 'omit'`. This forces an anonymous request, bypassing the multi-account cookie confusion (since the web app is deployed as Access: Anyone).
 - **Lesson:** **NEVER** use a default `fetch()` to call a Google Apps Script Web App without explicitly adding `credentials: 'omit'`.
 
+### LL-020: Freshdesk PUT Requests Silently Drop Tags if URL Has Query String
+- **Date:** 2026-09-16
+- **Commit:** `8b3aa45`
+- **What happened:** Successfully processed tickets and "noise" tickets were not receiving their `ai:` tags in Freshdesk. The batch processed them and logged them to the Google Sheet, but the tags were missing in the UI.
+- **Root cause:** The `ticketUrl` used for the `PUT` request included `?include=requester`. Freshdesk's API v2 silently drops array fields (like `tags`) from the `PUT` payload if there is a query string on the URL. 
+- **Permanent fix:** Always use `var cleanUrl = ticketUrl.split('?')[0];` before passing it to `UrlFetchApp.fetch` for a `PUT` request.
+
 ---
 
 ## 🟡 ARCHITECTURAL DECISIONS & LESSONS
