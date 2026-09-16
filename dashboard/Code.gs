@@ -977,7 +977,8 @@ function processTicket(ticketId, dryRun) {
         var existingTags = ticket.tags || [];
         if (existingTags.indexOf('ai:skipped-noise') === -1) {
           existingTags.push('ai:skipped-noise');
-          UrlFetchApp.fetch(ticketUrl, {
+          var cleanUrl = ticketUrl.split('?')[0];
+          UrlFetchApp.fetch(cleanUrl, {
             'method': 'put',
             'headers': { 'Authorization': fdOpts.headers.Authorization, 'Content-Type': 'application/json' },
             'payload': JSON.stringify({ tags: existingTags }),
@@ -998,7 +999,8 @@ function processTicket(ticketId, dryRun) {
         var existingTags = ticket.tags || [];
         if (existingTags.indexOf('ai:skipped-noise') === -1) {
           existingTags.push('ai:skipped-noise');
-          UrlFetchApp.fetch(ticketUrl, {
+          var cleanUrl = ticketUrl.split('?')[0];
+          UrlFetchApp.fetch(cleanUrl, {
             'method': 'put',
             'headers': { 'Authorization': fdOpts.headers.Authorization, 'Content-Type': 'application/json' },
             'payload': JSON.stringify({ tags: existingTags }),
@@ -1101,12 +1103,15 @@ function processTicket(ticketId, dryRun) {
     // Only include fields we are explicitly setting. Do NOT pre-populate required fields
     // with guessed values — this breaks tickets that already have valid values stored.
     // The auto-fix loop below handles the rare case where Freshdesk's existing value is invalid.
+    var tagsToAdd = aiResult.tags_to_add || [];
+    if (tagsToAdd.length === 0) tagsToAdd = ['ai:processed'];
+
     var updatePayload = {
       custom_fields: {
         cf_revised_subject_name: aiResult.proposed_subject,
         cf_ai_summary_notes: aiResult.summary
       },
-      tags: (ticket.tags || []).filter(function(t) { return t.indexOf('ai:') !== 0; }).concat((aiResult.tags_to_add || []).map(function(tag) { return String(tag).substring(0, 32); }))
+      tags: (ticket.tags || []).filter(function(t) { return t.indexOf('ai:') !== 0; }).concat(tagsToAdd.map(function(tag) { return String(tag).substring(0, 32); }))
     };
     
     var updateOptions = {
@@ -1117,7 +1122,8 @@ function processTicket(ticketId, dryRun) {
       muteHttpExceptions: true
     };
     
-    var updateRes = UrlFetchApp.fetch(ticketUrl, updateOptions);
+    var cleanUpdateUrl = ticketUrl.split('?')[0];
+    var updateRes = UrlFetchApp.fetch(cleanUpdateUrl, updateOptions);
     
     // Auto-fix Freshdesk mandatory field validation errors on legacy/broken tickets
     var fdRetries = 5;
@@ -1187,7 +1193,7 @@ function processTicket(ticketId, dryRun) {
       
       if (needsRetry) {
         updateOptions.payload = JSON.stringify(updatePayload);
-        updateRes = UrlFetchApp.fetch(ticketUrl, updateOptions);
+        updateRes = UrlFetchApp.fetch(cleanUpdateUrl, updateOptions);
         fdRetries--;
       } else {
         break; // Unhandled validation error, give up
@@ -1481,7 +1487,12 @@ function batchProcessTickets(dryRun) {
       // 2. Skip excluded ticket types (Spam, Runner Internal - they are noise)
       if (EXCLUDED_TICKET_TYPES.indexOf(ticketType) !== -1) {
         skippedCount++;
-        if (!alreadyProcessed) logAiProcessing(ticketId, 'skipped', 'Skipped: Excluded Ticket Type', dryRun, null);
+        if (!alreadyProcessed) {
+          logAiProcessing(ticketId, 'skipped', 'Skipped: Excluded Ticket Type', dryRun, null);
+          if (!dryRun) {
+            updateFreshdeskTicketTags(ticketId, ['ai:skipped']);
+          }
+        }
         continue;
       }
       
